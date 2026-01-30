@@ -59,20 +59,20 @@ Implement all missing critical features to reach production-ready v1.0, includin
 ---
 
 ### Phase 2: File Management Core 📁
-**Status:** NOT STARTED  
+**Status:** IN PROGRESS  
 **Branch:** `feat/file-management`
 
-- [ ] 2.1 Implement file picker integration
+- [x] 2.1 Implement file picker integration
   - Wire up `file_picker` package
   - Single and multi-file selection
   - Progress indicator during encryption
 
-- [ ] 2.2 Add drag & drop support
-  - `desktop_drop` or `flutter_dropzone` package
+- [x] 2.2 Add drag & drop support
+  - `desktop_drop` package added
   - Visual drop zone overlay
   - Handle multiple files
 
-- [ ] 2.3 Implement file preview
+- [ ] 2.3 Implement file preview (deferred to Phase 5)
   - Image preview (thumbnails)
   - Text file preview
   - PDF preview (basic)
