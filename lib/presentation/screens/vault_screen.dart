@@ -1,8 +1,9 @@
 import 'dart:io';
 
+import 'package:desktop_drop/desktop_drop.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:macos_ui/macos_ui.dart';
 
@@ -19,6 +20,7 @@ class VaultScreen extends StatefulWidget {
 class _VaultScreenState extends State<VaultScreen> {
   final _searchController = TextEditingController();
   String _selectedFileId = '';
+  bool _isDragging = false;
 
   @override
   void initState() {
@@ -73,7 +75,7 @@ class _VaultScreenState extends State<VaultScreen> {
                   ),
                   MacosPulldownMenuItem(
                     title: const Text('Import Files'),
-                    onTap: () {},
+                    onTap: () => _showAddFilesDialog(),
                   ),
                   const MacosPulldownMenuDivider(),
                   MacosPulldownMenuItem(
@@ -85,56 +87,105 @@ class _VaultScreenState extends State<VaultScreen> {
             ],
           ),
           children: [
-            ContentArea(
-              builder: (context, scrollController) {
-                if (state is VaultLoading || state is VaultInitial) {
-                  return const Center(child: ProgressCircle());
+            DropTarget(
+              onDragDone: (details) {
+                final files = details.files
+                    .where((f) => f.path != null)
+                    .map((f) => f.path!)
+                    .toList();
+                if (files.isNotEmpty) {
+                  context.read<VaultBloc>().add(AddFilesRequested(filePaths: files));
                 }
-
-                if (state is VaultError && state is! VaultLoaded) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const MacosIcon(
-                          CupertinoIcons.exclamationmark_triangle_fill,
-                          size: 48,
-                          color: MacosColors.systemRedColor,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'Error loading vault',
-                          style: MacosTheme.of(context).typography.title2,
-                        ),
-                        const SizedBox(height: 8),
-                        Text((state as VaultError).message),
-                        const SizedBox(height: 16),
-                        PushButton(
-                          controlSize: ControlSize.regular,
-                          onPressed: () {
-                            context.read<VaultBloc>().add(VaultLoadRequested());
-                          },
-                          child: const Text('Retry'),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                if (state is VaultLoaded || state is VaultFileAdding || state is VaultFileDecrypting) {
-                  final files = state is VaultLoaded 
-                    ? state.files 
-                    : (state as dynamic).files ?? [];
-                  
-                  if (files.isEmpty) {
-                    return _buildEmptyState();
-                  }
-
-                  return _buildFileGrid(files, state);
-                }
-
-                return const Center(child: Text('Unknown state'));
+                setState(() => _isDragging = false);
               },
+              onDragEntered: (_) => setState(() => _isDragging = true),
+              onDragExited: (_) => setState(() => _isDragging = false),
+              child: ContentArea(
+                builder: (context, scrollController) {
+                  Widget content;
+                  
+                  if (state is VaultLoading || state is VaultInitial) {
+                    content = const Center(child: ProgressCircle());
+                  } else if (state is VaultError && state is! VaultLoaded) {
+                    content = Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const MacosIcon(
+                            CupertinoIcons.exclamationmark_triangle_fill,
+                            size: 48,
+                            color: MacosColors.systemRedColor,
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'Error loading vault',
+                            style: MacosTheme.of(context).typography.title2,
+                          ),
+                          const SizedBox(height: 8),
+                          Text((state as VaultError).message),
+                          const SizedBox(height: 16),
+                          PushButton(
+                            controlSize: ControlSize.regular,
+                            onPressed: () {
+                              context.read<VaultBloc>().add(VaultLoadRequested());
+                            },
+                            child: const Text('Retry'),
+                          ),
+                        ],
+                      ),
+                    );
+                  } else if (state is VaultLoaded || state is VaultFileAdding || state is VaultFileDecrypting) {
+                    final files = state is VaultLoaded 
+                      ? state.files 
+                      : (state as dynamic).files ?? [];
+                    
+                    if (files.isEmpty) {
+                      content = _buildEmptyState();
+                    } else {
+                      content = _buildFileGrid(files, state);
+                    }
+                  } else {
+                    content = const Center(child: Text('Unknown state'));
+                  }
+                  
+                  // Show drag overlay when dragging files
+                  if (_isDragging) {
+                    return Container(
+                      color: MacosColors.systemBlueColor.withOpacity(0.1),
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.all(32),
+                          decoration: BoxDecoration(
+                            color: MacosColors.systemBlueColor.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: MacosColors.systemBlueColor,
+                              width: 2,
+                            ),
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const MacosIcon(
+                                CupertinoIcons.arrow_down_doc,
+                                size: 64,
+                                color: MacosColors.systemBlueColor,
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                'Drop files here to encrypt',
+                                style: MacosTheme.of(context).typography.title1,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+                  
+                  return content;
+                },
+              ),
             ),
             if (_selectedFileId.isNotEmpty)
               ResizablePane(
@@ -493,28 +544,26 @@ class _VaultScreenState extends State<VaultScreen> {
     );
   }
 
-  void _showAddFilesDialog() {
-    // In a real implementation, this would use file_picker
-    // For now, we'll simulate adding files
-    showMacosAlertDialog(
-      context: context,
-      builder: (_) => MacosAlertDialog(
-        appIcon: const MacosIcon(
-          CupertinoIcons.folder_badge_plus,
-          size: 56,
-        ),
-        title: const Text('Add Files'),
-        message: const Text(
-          'In the full implementation, this would open a file picker. '
-          'Files would be encrypted with AES-256-GCM using unique per-file keys.',
-        ),
-        primaryButton: PushButton(
-          controlSize: ControlSize.large,
-          onPressed: () => Navigator.pop(context),
-          child: const Text('OK'),
-        ),
-      ),
-    );
+  Future<void> _showAddFilesDialog() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        type: FileType.any,
+      );
+      
+      if (result != null && result.files.isNotEmpty) {
+        final filePaths = result.files
+            .where((f) => f.path != null)
+            .map((f) => f.path!)
+            .toList();
+        
+        if (filePaths.isNotEmpty) {
+          context.read<VaultBloc>().add(AddFilesRequested(filePaths: filePaths));
+        }
+      }
+    } catch (e) {
+      _showError('Failed to pick files: $e');
+    }
   }
 
   void _showDeleteConfirmation(String fileId, String filename) {
@@ -554,8 +603,9 @@ class _VaultScreenState extends State<VaultScreen> {
     );
   }
 
-  void _showExportDialog() {
-    showMacosAlertDialog(
+  Future<void> _showExportDialog() async {
+    // First show info dialog
+    final shouldProceed = await showMacosAlertDialog<bool>(
       context: context,
       builder: (_) => MacosAlertDialog(
         appIcon: const MacosIcon(
@@ -565,24 +615,110 @@ class _VaultScreenState extends State<VaultScreen> {
         title: const Text('Export Vault'),
         message: const Text(
           'Export your entire encrypted vault for backup. '
-          'The backup will be encrypted with your current keys.',
+          'The backup will be encrypted with your current keys.\n\n'
+          'You will need your recovery key to restore this backup.',
         ),
         primaryButton: PushButton(
           controlSize: ControlSize.large,
-          onPressed: () {
-            Navigator.pop(context);
-            // Trigger export
-          },
-          child: const Text('Export'),
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Continue'),
         ),
         secondaryButton: PushButton(
           controlSize: ControlSize.large,
           secondary: true,
-          onPressed: () => Navigator.pop(context),
+          onPressed: () => Navigator.pop(context, false),
           child: const Text('Cancel'),
         ),
       ),
     );
+    
+    if (shouldProceed != true) return;
+    
+    // Pick destination directory
+    final result = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Select Backup Destination',
+    );
+    
+    if (result == null) return;
+    
+    // Trigger export
+    context.read<VaultBloc>().add(VaultExportRequested(destinationPath: result));
+  }
+  
+  Future<void> _showImportDialog() async {
+    // Show info first
+    final shouldProceed = await showMacosAlertDialog<bool>(
+      context: context,
+      builder: (_) => MacosAlertDialog(
+        appIcon: const MacosIcon(
+          CupertinoIcons.arrow_down_doc,
+          size: 56,
+        ),
+        title: const Text('Import Vault'),
+        message: const Text(
+          'Import a previously exported vault.\n\n'
+          'WARNING: This will replace your current vault. '
+          'Make sure you have a backup if needed.',
+        ),
+        primaryButton: PushButton(
+          controlSize: ControlSize.large,
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Continue'),
+        ),
+        secondaryButton: PushButton(
+          controlSize: ControlSize.large,
+          secondary: true,
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+      ),
+    );
+    
+    if (shouldProceed != true) return;
+    
+    // Pick vault package file
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.any,
+      allowMultiple: false,
+      dialogTitle: 'Select Vault Backup',
+    );
+    
+    if (result == null || result.files.isEmpty || result.files.first.path == null) {
+      return;
+    }
+    
+    // Show confirmation
+    final confirmImport = await showMacosAlertDialog<bool>(
+      context: context,
+      builder: (_) => MacosAlertDialog(
+        appIcon: const MacosIcon(
+          CupertinoIcons.exclamationmark_triangle_fill,
+          size: 56,
+          color: MacosColors.systemOrangeColor,
+        ),
+        title: const Text('Confirm Import'),
+        message: const Text(
+          'This will REPLACE your current vault with the imported backup.\n\n'
+          'This action cannot be undone.',
+        ),
+        primaryButton: PushButton(
+          controlSize: ControlSize.large,
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Replace Vault'),
+        ),
+        secondaryButton: PushButton(
+          controlSize: ControlSize.large,
+          secondary: true,
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+      ),
+    );
+    
+    if (confirmImport == true) {
+      // TODO: Implement import vault
+      _showError('Import not yet implemented. This feature is coming soon.');
+    }
   }
 
   void _showError(String message) {
