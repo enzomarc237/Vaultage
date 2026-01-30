@@ -17,7 +17,7 @@ class CryptoService {
   
   /// Initialize the crypto service with a PIN (first-time setup)
   Future<({String recoveryKey, Uint8List wrappedMasterKey, Uint8List salt, Map<String, dynamic> params})> 
-      initializeWithPin(String pin) async {
+      initializeWithPin(String pin, {String? recoveryKey}) async {
     // Generate master key
     final masterKey = CryptoUtils.generateMasterKey();
     
@@ -28,8 +28,8 @@ class CryptoService {
     // Wrap master key with KEK
     final wrappedMasterKey = CryptoUtils.wrapKey(masterKey, derivedKey.key);
     
-    // Generate recovery key
-    final recoveryKey = CryptoUtils.generateRecoveryKey();
+    // Use provided recovery key or generate new one
+    final effectiveRecoveryKey = recoveryKey ?? CryptoUtils.generateRecoveryKey();
     
     // Cache master key for current session
     _cachedMasterKey = Uint8List.fromList(masterKey);
@@ -39,7 +39,7 @@ class CryptoService {
     derivedKey.zeroize();
     
     return (
-      recoveryKey: recoveryKey,
+      recoveryKey: effectiveRecoveryKey,
       wrappedMasterKey: wrappedMasterKey,
       salt: _keyDerivationSalt!,
       params: derivedKey.params,

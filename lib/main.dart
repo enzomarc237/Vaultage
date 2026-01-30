@@ -11,6 +11,7 @@ import 'package:tray_manager/tray_manager.dart';
 
 import 'application/blocs/blocs.dart';
 import 'application/services/services.dart';
+import 'core/security/crypto_utils.dart';
 import 'infrastructure/repositories/repositories.dart';
 import 'presentation/screens/screens.dart';
 
@@ -327,8 +328,11 @@ class _AppWindowState extends State<AppWindow> with WindowListener, TrayListener
     }
 
     if (state is AuthNeedsSetup) {
-      return SetupScreen(onComplete: (pin) {
-        context.read<AuthBloc>().add(SetupCompleted(pin: pin));
+      return SetupScreen(onComplete: (pin, recoveryKey) {
+        context.read<AuthBloc>().add(SetupCompleted(
+          pin: pin,
+          recoveryKey: recoveryKey,
+        ));
       });
     }
 
@@ -364,7 +368,7 @@ class _AppWindowState extends State<AppWindow> with WindowListener, TrayListener
 }
 
 class SetupScreen extends StatefulWidget {
-  final Function(String) onComplete;
+  final Function(String pin, String recoveryKey) onComplete;
 
   const SetupScreen({super.key, required this.onComplete});
 
@@ -377,6 +381,7 @@ class _SetupScreenState extends State<SetupScreen> {
   final _confirmPinController = TextEditingController();
   int _pinLength = 6;
   bool _isCreating = true;
+  String _recoveryKey = '';
 
   @override
   Widget build(BuildContext context) {
@@ -474,9 +479,6 @@ class _SetupScreenState extends State<SetupScreen> {
   }
 
   Widget _buildRecoveryKey() {
-    // Generate recovery key (in real implementation, this would be cryptographically secure)
-    final recoveryKey = 'apple lumber crystal brave ocean dentist flower magic seven captain bridge';
-    
     return Column(
       children: [
         const MacosIcon(
@@ -505,8 +507,8 @@ class _SetupScreenState extends State<SetupScreen> {
               color: MacosColors.systemOrangeColor.withOpacity(0.5),
             ),
           ),
-          child: Text(
-            recoveryKey,
+          child: SelectableText(
+            _recoveryKey,
             style: const TextStyle(
               fontFamily: 'monospace',
               fontSize: 14,
@@ -522,8 +524,27 @@ class _SetupScreenState extends State<SetupScreen> {
             PushButton(
               controlSize: ControlSize.regular,
               secondary: true,
-              onPressed: () {
-                // Copy to clipboard
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: _recoveryKey));
+                if (mounted) {
+                  showMacosAlertDialog(
+                    context: context,
+                    builder: (_) => MacosAlertDialog(
+                      appIcon: const MacosIcon(
+                        CupertinoIcons.checkmark_circle,
+                        size: 56,
+                        color: MacosColors.systemGreenColor,
+                      ),
+                      title: const Text('Copied'),
+                      message: const Text('Recovery key copied to clipboard.'),
+                      primaryButton: PushButton(
+                        controlSize: ControlSize.large,
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('OK'),
+                      ),
+                    ),
+                  );
+                }
               },
               child: const Text('Copy'),
             ),
@@ -531,7 +552,7 @@ class _SetupScreenState extends State<SetupScreen> {
             PushButton(
               controlSize: ControlSize.regular,
               onPressed: () {
-                widget.onComplete(_pinController.text);
+                widget.onComplete(_pinController.text, _recoveryKey);
               },
               child: const Text('I\'ve Saved It'),
             ),
@@ -552,6 +573,7 @@ class _SetupScreenState extends State<SetupScreen> {
     }
     setState(() {
       _isCreating = false;
+      _recoveryKey = CryptoUtils.generateRecoveryKey();
     });
   }
 
