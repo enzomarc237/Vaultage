@@ -355,11 +355,21 @@ class FileRepository {
     Map<String, dynamic> manifest;
     if (await manifestFile.exists()) {
       // Load existing manifest (handles both encrypted and unencrypted)
-      final existingFiles = await loadManifest();
-      manifest = {
-        'version': currentManifestVersion,
-        'files': existingFiles.map((f) => _storedFileToJson(_convertToStoredFile(f))).toList(),
-      };
+      final bytes = await manifestFile.readAsBytes();
+      if (_isEncryptedManifest(bytes)) {
+        if (_cryptoService.isUnlocked) {
+          manifest = await _decryptManifest(bytes);
+        } else {
+          // Can't decrypt, start fresh
+          manifest = {
+            'version': currentManifestVersion,
+            'created_at': DateTime.now().millisecondsSinceEpoch,
+            'files': <dynamic>[],
+          };
+        }
+      } else {
+        manifest = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
+      }
     } else {
       manifest = {
         'version': currentManifestVersion,
@@ -384,30 +394,6 @@ class FileRepository {
     }
   }
   
-  /// Helper to convert VaultFile back to StoredFile
-  StoredFile _convertToStoredFile(VaultFile file) {
-    return StoredFile(
-      id: file.id,
-      header: FileHeader(
-        version: 1,
-        algorithm: 'AES-256-GCM',
-        wrappedKey: Uint8List(0),
-        nonce: Uint8List(12),
-        encryptedMetadata: Uint8List(0),
-        originalSize: file.size,
-      ),
-      metadata: FileMetadata(
-        originalName: file.filename,
-        mimeType: file.mimeType ?? 'application/octet-stream',
-        createdAt: file.createdAt.millisecondsSinceEpoch,
-        modifiedAt: file.modifiedAt.millisecondsSinceEpoch,
-        size: file.size,
-      ),
-      ciphertextHash: file.ciphertextHash,
-      storagePath: '',
-    );
-  }
-  
   /// Remove file from manifest
   Future<void> _removeFromManifest(String fileId) async {
     final manifestPath = await _getManifestPath();
@@ -415,16 +401,25 @@ class FileRepository {
     
     if (!await manifestFile.exists()) return;
     
-    // Load existing manifest
-    final existingFiles = await loadManifest();
-    final updatedFiles = existingFiles.where((f) => f.id != fileId).toList();
+    // Load existing manifest - we need to work with the raw JSON
+    Map<String, dynamic> manifest;
+    try {
+      final bytes = await manifestFile.readAsBytes();
+      if (_isEncryptedManifest(bytes)) {
+        if (!_cryptoService.isUnlocked) return;
+        manifest = await _decryptManifest(bytes);
+      } else {
+        manifest = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
+      }
+    } catch (e) {
+      return;
+    }
     
-    final manifest = {
-      'version': currentManifestVersion,
-      'created_at': DateTime.now().millisecondsSinceEpoch,
-      'updated_at': DateTime.now().millisecondsSinceEpoch,
-      'files': updatedFiles.map((f) => _storedFileToJson(_convertToStoredFile(f))).toList(),
-    };
+    // Remove file from list
+    final files = manifest['files'] as List<dynamic>;
+    files.removeWhere((f) => (f as Map<String, dynamic>)['id'] == fileId);
+    
+    manifest['updated_at'] = DateTime.now().millisecondsSinceEpoch;
     
     // Save encrypted if vault is unlocked
     if (_cryptoService.isUnlocked) {
