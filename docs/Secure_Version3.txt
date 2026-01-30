@@ -1,0 +1,447 @@
+# Secure File Vault — Detailed Design & Implementation Guide
+
+Version: 1.0  
+Last updated: 2026-01-24  
+Author: Enzo (enzomarc237)
+
+Summary
+-------
+Secure File Vault is a macOS desktop application that provides encrypted storage for sensitive files. This document expands the project README into a full design, security architecture, implementation guidance, testing plan, build and distribution notes, data formats, and a stack comparison (React + Tauri vs Flutter + Dart) to help decide the implementation path.
+
+Table of Contents
+-----------------
+- Project overview
+- Goals and non-goals
+- Threat model & security assumptions
+- High-level architecture
+- Data and cryptography design
+- Authentication & UX flows
+- Auto-destruction (remote trigger) design & security
+- Native macOS integration & entitlements
+- Persistence, metadata, and storage
+- UI/UX and accessibility
+- Logging, telemetry, and privacy
+- Testing strategy (unit, integration, security testing)
+- CI/CD, notarization, code signing
+- Configuration & settings screen reference
+- Developer setup and build steps
+- Known risks and mitigations
+- Roadmap
+- Stack comparison: React + Tauri vs Flutter + Dart
+- Appendix: file format spec, recommended libs & references
+
+Project overview
+----------------
+Secure File Vault provides:
+- Encrypted storage (AES-256 AEAD) for arbitrary file types.
+- PIN-based authentication (configurable), with support for biometric unlock planned.
+- Auto-lock & auto-logout on unfocus or inactivity.
+- Configurable maximum login attempts with lockout.
+- Secure deletion by crypto-shredding (with considerations for SSD/APFS).
+- File integrity verification and per-file metadata.
+- Auto-destruction on remote trigger (configurable URL + interval) with secure wipe behavior.
+- Native macOS UI (using macos_ui if implemented in Flutter) and system tray integration.
+
+Goals
+-----
+- Strong, auditable cryptographic protections for files at rest.
+- Minimal attack surface for exfiltration or local compromise.
+- Reasonable usability for non-technical users.
+- Auditable and extensible architecture for future features (biometrics, cloud sync).
+
+Non-goals
+---------
+- A cloud-first sync solution (out of scope for initial release).
+- Full-disk encryption replacement.
+- Attempting to physically sanitize SSD internals — rely on crypto-shredding.
+
+Threat model & security assumptions
+----------------------------------
+Assumptions:
+- Attacker may obtain physical access to the device or a copy of the user’s files (e.g., from backup).
+- The OS is presumed uncompromised at kernel/secure enclave level for full guarantees. Kernel-level or Secure Enclave compromise limits guarantees.
+- Auto-destruction trigger transport channels must be protected by TLS; the endpoint is assumed not compromised.
+
+Threats:
+- Brute-force PIN guessing.
+- Local privilege escalation to read key material from process memory or temporary files.
+- Remote code or UI injection (if a web-based UI is used).
+- MITM or unauthorized remote triggers.
+
+Mitigations:
+- Rate-limiting and configurable lockout policies.
+- Use AEAD ciphers (AES-GCM or ChaCha20-Poly1305) for confidentiality and integrity.
+- Use Keychain and Secure Enclave for long-lived keys or key-wrapping keys.
+- Avoid writing plaintext to disk; zero memory containing secrets promptly.
+- Require signed/verified triggers and TLS + certificate pinning for remote destruction.
+
+High-level architecture
+-----------------------
+- Presentation layer (UI): macOS-native window, system tray/NSStatusItem, settings UI.
+- Application layer: BLoC (or equivalent) for state management and business logic.
+- Core/Security layer:
+  - Encryption service (file encrypt/decrypt)
+  - Key manager (master key, per-file keys, Keychain wrapper)
+  - Secure deletion service
+  - Remote destruction service
+- Persistence: Encrypted manifest & metadata store (sqlite or encrypted JSON) stored inside vault folder (manifest AEAD-protected).
+- Repositories:
+  - FileRepository: reads/writes encrypted file blobs
+  - SettingsRepository: stores configuration securely (Keychain for secrets, encrypted file for sensitive settings)
+- Interop: platform adapters (Keychain, LocalAuthentication, file watcher)
+
+Data and cryptography design
+----------------------------
+Design goals:
+- Use authenticated encryption (AEAD).
+- Keep secrets off disk whenever possible.
+- Use per-file keys to limit blast radius.
+
+Recommended cryptographic primitives:
+- AEAD: AES-256-GCM or ChaCha20-Poly1305 (AES-GCM preferred when hardware AES available).
+- KDF: Argon2id (preferred); fallback: PBKDF2-HMAC-SHA256 with high iteration/memory cost.
+- RNG: SecRandomCopyBytes on macOS or equivalent secure RNG.
+- Use Secure Enclave for storing wrapping keys where possible.
+
+Master key model (recommended)
+- MasterKey: 256-bit symmetric key used to wrap per-file keys and derive metadata keys.
+- Storage patterns:
+  - Primary: Store MasterKey wrapped by a Key Encryption Key (KEK) bound to Secure Enclave/Keychain.
+  - Fallback (PIN-only): derive KEK from user PIN using Argon2id to decrypt the stored MasterKey.
+- Always store only wrapped/encrypted MasterKey on disk. Minimize time MasterKey exists in memory; zero after use.
+
+Per-file encryption
+- For each file:
+  - Generate a new 256-bit FileKey.
+  - Encrypt file content with AEAD using a fresh nonce/IV per encryption.
+  - Wrap the FileKey with the MasterKey using AES-KW (RFC 3394) or an AEAD-wrapping scheme.
+- Store per-file metadata header with version, wrapped_key, algorithm, nonce, AEAD tag, and metadata (encrypted or in manifest).
+- Optionally encrypt filenames or use hashed filename identifiers to avoid metadata leakage.
+
+File header considerations
+- Keep plaintext metadata minimal; encrypt filenames or store random UUID file-names on disk with mapping in an encrypted manifest.
+- Version headers for migration and future-proofing.
+
+Integrity verification
+- AEAD provides ciphertext integrity checks.
+- Optionally maintain a signed manifest that includes ciphertext hashes (SHA-256) and is AEAD-protected or signed with a MasterKey-derived signing key.
+
+Secure deletion (crypto-shredding)
+- On SSD/APFS, overwrites are unreliable. Rely on crypto-shredding:
+  - Delete wrapped file key(s) so ciphertext becomes unrecoverable.
+  - Remove plaintext caches, temp files, thumbnails.
+  - Delete Keychain items.
+  - Optionally call unlink/ftruncate on file blobs.
+- For auto-destruction, crypto-shred MasterKey wrappers and delete manifest and file blobs.
+
+Key rotation & migration
+- Support re-wrapping file keys when rotating MasterKey.
+- Provide migration tooling to re-encrypt with new parameters or algorithms.
+- Maintain manifest versioning and migration logs.
+
+Memory handling
+- Mark critical memory non-swappable when possible.
+- Zero secrets after use; avoid extra copies of plaintext.
+- Stream encrypt/decrypt large files instead of loading entire files into memory.
+
+Authentication & UX flows
+------------------------
+PIN-based authentication
+- Minimum PIN length is configurable; default recommended: 6 digits.
+- Do not store PIN plaintext. Use it to derive KEK via Argon2id or unlock Keychain-protected MasterKey.
+- Rate-limiting and lockout (recommended defaults):
+  - Max attempts: 10
+  - Initial lockout: 30 seconds
+  - Exponential backoff multiplier: 2x
+  - Optional "wipe after N failed attempts" is available but disabled by default and must show strong warnings.
+
+Session & auto-logout
+- Idle timeout: configurable (default 300s).
+- Auto-lock on app unfocus/background/resignActive: immediate or configurable grace period.
+- Option to require full PIN on re-auth or allow biometric re-unlock.
+
+Biometric integration (planned)
+- Use macOS LocalAuthentication (Touch ID / Face ID).
+- Biometric should unlock Keychain-wrapped MasterKey; fallback to PIN when biometric unavailable.
+- Do not store biometric data in app; rely on OS APIs.
+
+Recovery options
+- Provide an optional "recovery key" (32-byte high-entropy string) for manual recovery.
+- Recovery key unwraps MasterKey; warn users that losing recovery key is irreversible if no other recovery configured.
+- Cloud escrow is out of scope for initial release.
+
+Auto-destruction (remote trigger)
+--------------------------------
+Features:
+- Periodically poll a configured HTTPS URL for a signed trigger.
+- On validated trigger, perform secure full vault wipe.
+
+Security:
+- Require TLS with certificate validation and recommend certificate pinning.
+- Require trigger messages to be signed (HMAC with pre-shared secret or asymmetric signature).
+- Never auto-destroy based on unsigned or unverifiable responses.
+- Implement back-off and log last successful check; avoid relying on negative signals (e.g., unreachable endpoint should not auto-destroy).
+
+Behavior on trigger:
+- Crypto-shred MasterKey wrappers and delete Keychain items and manifest.
+- Unlink/delete file blobs and overwrite in-memory keys.
+- Optionally provide a configurable grace period to abort (user choice when enabling feature).
+
+Native macOS integration & entitlements
+--------------------------------------
+Entitlements / signing:
+- Hardened runtime enabled.
+- Code signing and notarization are required for distribution.
+- Sandbox considerations: com.apple.security.app-sandbox if desired (note Keychain and LocalAuthentication are supported with correct entitlements).
+- If providing a LaunchAgent/SMLogin helper, use Service Management APIs responsibly and with user opt-in.
+
+System integration:
+- Use NSStatusItem or equivalent for menu bar/status item.
+- Start at login via SMLoginItemSetEnabled or Launch Agent (opt-in only).
+
+Persistence, metadata, and storage
+--------------------------------
+Vault layout (example)
+- Vault root (user configurable):
+  - manifest.enc (AEAD-protected manifest)
+  - files/ (encrypted file blobs; names are UUIDs)
+  - config.enc (encrypted settings containing any secrets)
+  - logs/ (non-sensitive local logs only)
+  - .lock (indicates lock state; cleared on unlock)
+
+Manifest:
+- Encrypted JSON array keyed by MasterKey:
+  - file_id (UUID)
+  - filename_hmac (HMAC over original filename, keyed by MasterKey-derived key)
+  - cipher_hash (SHA-256 of ciphertext)
+  - size, created_at, updated_at
+- Manifest AEAD-protected and optionally signed.
+
+Filenames:
+- Store filenames encrypted in manifest, or use HMAC mapping with UUID filenames on-disk to avoid leaking filenames.
+
+UI/UX and accessibility
+----------------------
+Design principles:
+- Clear visible status: locked/unlocked, last auto-destruction check, last backup time.
+- Safeguards on destructive operations with explicit confirmations.
+- Simple default settings and advanced options for power users.
+
+Accessibility:
+- VoiceOver support, keyboard navigation, visible focus states.
+- Accessible PIN entry with clear labels and alternatives for assistive tech.
+
+Internationalization:
+- Use standard i18n pipeline (Flutter provides i18n support; web stack has many options).
+
+Logging, telemetry, and privacy
+-------------------------------
+- Avoid collecting or transmitting sensitive metadata or filenames to remote servers.
+- If telemetry is used, make it opt-in and non-sensitive only.
+- Local logs should avoid storing secrets or exact PIN attempts; store high-level events and timestamps only.
+- Audit log entries: unlock, lock, auto-destroy invoked, last successful check time for auto-destroy endpoint.
+
+Testing strategy
+----------------
+Unit tests:
+- Crypto primitives (encrypt/decrypt), KDF correctness, header parsing.
+- Key wrapping/unwrapping and manifest round-trip.
+
+Integration tests:
+- Migrations and upgrade scenarios.
+- Auto-lock/unfocus flows ensuring no plaintext persists.
+
+Security testing:
+- Threat modeling and manual code review of boundary code.
+- SAST (semgrep) and dependency scanning (cargo-audit/npm audit).
+- Fuzzing for file parser and manifest ingestion.
+- Optional third-party security audit for cryptographic correctness.
+
+Performance testing:
+- Streaming large-file encrypt/decrypt tests.
+- Memory usage tests during multiple concurrent decrypt operations.
+
+CI/CD, notarization, code signing
+--------------------------------
+- Use GitHub Actions (macOS runners) to:
+  - Run tests
+  - Build macOS release
+  - Code sign and notarize (using notarytool or altool)
+  - Package into .dmg/.pkg
+- Keep signing credentials in secure secrets store (GitHub Secrets, Apple Keychain on runner).
+- For Tauri/Rust-based builds, add cargo build steps and notarization.
+
+Configuration & settings screen reference
+-----------------------------------------
+Settings:
+- Vault location (path)
+- Auto-logout duration (seconds/minutes) — default 300s
+- Maximum login attempts — default 10
+- Lockout policy (exponential backoff toggle)
+- Wipe after N failed attempts — default disabled; explicit confirmation required
+- Auto-destruction:
+  - URL (HTTPS)
+  - Interval (minutes/hours)
+  - Verification mode: signed (recommended) / unsigned
+  - Last checked (read-only)
+- Biometric unlock: enabled/disabled
+- Start at login: enabled/disabled
+- System integration: show in menu bar
+- Backup: export/import encrypted vault
+- About / License / Version
+
+Developer setup & build steps
+----------------------------
+Prerequisites:
+- macOS 10.15+
+- Xcode 14+
+- Flutter 3.7+ (if using Flutter)
+- Rust & Node/npm (if using Tauri)
+- Apple Developer account for signing/notarization
+
+Flutter (example):
+1. Clone repository:
+   git clone https://github.com/enzomarc237/crypto-vault-macos.git
+   cd crypto-vault-macos
+2. Install deps:
+   flutter pub get
+3. Run:
+   flutter run -d macos
+4. Build release:
+   flutter build macos
+   (sign & notarize afterwards)
+
+Tauri (example):
+1. Clone repo.
+2. Build web UI (React) with npm/yarn.
+3. Use Tauri build with Rust toolchain.
+4. Sign and notarize the produced bundle.
+
+Known risks & mitigations
+------------------------
+- Storing filenames leaks sensitive info: Mitigate by encrypting filenames or mapping to UUIDs.
+- SSD makes secure deletion unreliable: Use crypto-shredding.
+- Remote auto-destruction abuse: Require signed triggers, certificate pinning, and explicit user opt-in.
+- In-memory secrets after crash: Zero memory on close, mark pages non-swappable where possible.
+- UI injection with webview: Use compiled UI (Flutter) or hardened CSP + offline assets with Tauri.
+
+Roadmap
+-------
+- v0.1: Core AES-GCM encryption, PIN-based unlock, manifest, per-file encryption, auto-lock on unfocus, basic UI.
+- v0.2: Keychain integration, Argon2 KDF, improved settings, secure deletion (crypto-shred).
+- v0.3: Biometric unlock via Secure Enclave, manifest signing, backups.
+- v1.0: Notarized release, full testing & security audit.
+- Future: Cloud escrow, multi-device E2E sync, folder watchers, remote push/destruct.
+
+Stack comparison: React + Tauri vs Flutter + Dart
+------------------------------------------------
+Summary recommendation:
+- For macOS-first native-feel app with strong platform API support and a single UI language, Flutter + Dart is productive.
+- For web-first teams wanting small binaries and the ability to write crypto in Rust, React + Tauri is a strong alternative.
+
+Detailed comparison (high level):
+- Language & ecosystem:
+  - React + Tauri: Web UI (JS/TS) + Rust core. Great for web devs; requires Rust plugins for macOS-specific APIs.
+  - Flutter + Dart: Single language for UI & logic; plugin ecosystem supports macOS. Larger binary due to the Flutter engine.
+- Native OS integration:
+  - Tauri: Rust code needed for deep OS APIs; webview UI can pose injection risks if not hardened.
+  - Flutter: Easier platform channels and many plugins; macos_ui provides native look-and-feel.
+- Security surface:
+  - Tauri + Rust: Strong memory-safety for crypto if implemented in Rust; web UI must be hardened.
+  - Flutter: Compiled UI reduces DOM attack surface; cryptography in Dart is good but may use FFI for best performance.
+- Binary size & resource usage:
+  - Tauri: Usually smaller binary + web assets; webview memory usage varies.
+  - Flutter: Larger due to engine but offers smooth rendering and consistent UI.
+- Performance:
+  - Tauri: Use Rust for CPU-heavy crypto; UI performance depends on web stack.
+  - Flutter: Smooth custom UI; use FFI for intense crypto if needed.
+- Development ergonomics:
+  - Tauri: Web hot-reload; require Rust knowledge for native features.
+  - Flutter: Hot-reload and single language; easier to iterate on UI & state management.
+- Plugin & library availability:
+  - Both ecosystems have options. For security-critical crypto, Rust crates are mature; Dart has libraries and FFI options.
+
+Security posture recommendation:
+- If cryptography is core and memory safety matters, Tauri + Rust for crypto with a hardened web UI is excellent.
+- If you want faster integration, a native-feel UI and single-codebase, Flutter + Dart is more pragmatic.
+- Consider hybrid: Flutter UI + Rust crypto via FFI if you want the best of both worlds.
+
+Appendix: file format spec (example)
+-----------------------------------
+Vault file on disk: files/<file-uuid>.vfile
+
+Binary layout (high-level):
+- Header (length-prefixed JSON or protobuf):
+  - version: 1
+  - wrapped_key: base64(wrap(MasterKey, FileKey))
+  - alg: "AES-256-GCM"
+  - nonce: base64(12 bytes)
+  - metadata: base64(encrypted metadata JSON) or pointer into manifest
+- Ciphertext (remaining bytes) — AEAD tag included as per algorithm
+
+Manifest (manifest.enc):
+- AEAD-encrypted JSON array keyed by MasterKey:
+  - file_id: uuid
+  - filename_hmac: base64(HMAC(MasterKey_filename_key, filename))
+  - cipher_hash: hex(SHA-256(ciphertext))
+  - created_at: ISO8601
+  - size: bytes
+- Manifest is AEAD-protected and optionally signed.
+
+Memory / streaming:
+- Stream encrypt large files to avoid high memory usage.
+- Zero buffers after use.
+
+Recommended libraries & tooling
+------------------------------
+- Flutter:
+  - macos_ui (UI)
+  - flutter_bloc (state management)
+  - cryptography (Dart crypto primitives) or use FFI to libsodium
+  - local_auth (biometrics)
+  - flutter_secure_storage or custom Keychain plugin for macOS
+  - file_picker (optional)
+- Rust (if using Tauri or native crypto):
+  - ring, libsodium (sodiumoxide), or other vetted cryptographic crates
+  - security-framework crate or keyring crate for Keychain integration
+- Tauri:
+  - Tauri + Rust plugins + React/Next/CRA as UI
+- Testing & CI:
+  - GitHub Actions (macOS runners)
+  - SAST: semgrep, cargo-audit, npm audit
+
+References & further reading
+- Apple Developer docs: Keychain Services, LocalAuthentication, Notarization
+- RFCs for AEAD / AES-GCM, AES Key Wrap (RFC 3394)
+- Argon2 specification
+- APFS & SSD secure deletion considerations
+- OWASP guidance on secure storage & crypto best practices
+
+Contributing & governance
+-------------------------
+- Follow the contributing steps:
+  1. Fork the repo
+  2. Create feature branch (feature/...)
+  3. Run tests locally
+  4. Open PR; tag for security review for any crypto/key management changes
+- All changes to crypto/key management must include design rationale, tests, and migration plan.
+
+License
+-------
+MIT — see LICENSE file in repo.
+
+Changelog / Notes
+-----------------
+- Keep this document updated as implementation details (algorithms, KDF params, manifest schema) evolve.
+- All cryptography changes require approval in PR and migration tooling.
+
+What's next (practical steps)
+-----------------------------
+1. Choose the stack (React + Tauri or Flutter + Dart).
+2. Implement a PoC that:
+   - Generates MasterKey
+   - Encrypts a sample file using per-file key + AEAD
+   - Wraps the file key with MasterKey
+   - Stores a manifest
+   - Demonstrates crypto-shredding by deleting wrapped keys
+3. Expand to full UI, Keychain integration, tests; schedule an external security review before v1.0 release.
