@@ -1,17 +1,23 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:macos_ui/macos_ui.dart';
+
+import '../../application/blocs/auth_bloc.dart';
+import '../../application/services/biometric_service.dart';
 
 class LockScreen extends StatefulWidget {
   final int attemptsRemaining;
   final Duration? lockoutDuration;
   final Function(String) onUnlock;
+  final VoidCallback? onBiometricUnlock;
 
   const LockScreen({
     super.key,
     required this.attemptsRemaining,
     this.lockoutDuration,
     required this.onUnlock,
+    this.onBiometricUnlock,
   });
 
   @override
@@ -23,11 +29,59 @@ class _LockScreenState extends State<LockScreen> {
   final List<String> _pinDigits = [];
   bool _isError = false;
   bool _showRecovery = false;
+  bool _biometricAvailable = false;
+  bool _biometricEnabled = false;
+  final BiometricService _biometricService = BiometricService();
 
   @override
   void initState() {
     super.initState();
     _pinController.addListener(_onPinChanged);
+    _checkBiometricStatus();
+  }
+
+  Future<void> _checkBiometricStatus() async {
+    final available = await _biometricService.isBiometricAvailable();
+    final enabled = await _biometricService.isBiometricEnabled();
+    if (mounted) {
+      setState(() {
+        _biometricAvailable = available;
+        _biometricEnabled = enabled;
+      });
+    }
+  }
+
+  Future<void> _tryBiometricUnlock() async {
+    final result = await _biometricService.authenticateWithBiometrics();
+    
+    if (result.success && result.wrappedMasterKey != null) {
+      // Notify parent that biometric unlock succeeded
+      if (widget.onBiometricUnlock != null) {
+        widget.onBiometricUnlock!();
+      }
+    } else if (result.errorMessage != null) {
+      _showError(result.errorMessage!);
+    }
+  }
+
+  void _showError(String message) {
+    showMacosAlertDialog(
+      context: context,
+      builder: (_) => MacosAlertDialog(
+        appIcon: const MacosIcon(
+          CupertinoIcons.exclamationmark_circle,
+          size: 56,
+          color: MacosColors.systemRedColor,
+        ),
+        title: const Text('Authentication Error'),
+        message: Text(message),
+        primaryButton: PushButton(
+          controlSize: ControlSize.large,
+          onPressed: () => Navigator.pop(context),
+          child: const Text('OK'),
+        ),
+      ),
+    );
   }
 
   void _onPinChanged() {
@@ -171,6 +225,25 @@ class _LockScreenState extends State<LockScreen> {
                           color: widget.attemptsRemaining <= 3
                             ? MacosColors.systemRedColor
                             : MacosColors.systemOrangeColor,
+                        ),
+                      ),
+                    
+                    // Biometric unlock button
+                    if (!isInLockout && !_showRecovery && _biometricAvailable && _biometricEnabled)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: PushButton(
+                          controlSize: ControlSize.regular,
+                          secondary: true,
+                          onPressed: _tryBiometricUnlock,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              MacosIcon(CupertinoIcons.lock_shield_fill),
+                              const SizedBox(width: 8),
+                              const Text('Unlock with Biometrics'),
+                            ],
+                          ),
                         ),
                       ),
                     

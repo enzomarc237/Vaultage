@@ -343,6 +343,9 @@ class _AppWindowState extends State<AppWindow> with WindowListener, TrayListener
         onUnlock: (pin) {
           context.read<AuthBloc>().add(UnlockRequested(pin: pin));
         },
+        onBiometricUnlock: () {
+          context.read<AuthBloc>().add(BiometricUnlockRequested());
+        },
       );
     }
 
