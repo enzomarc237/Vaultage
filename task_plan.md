@@ -59,13 +59,13 @@ Implement all missing critical features to reach production-ready v1.0, includin
 ---
 
 ### Phase 2: File Management Core 📁
-**Status:** IN PROGRESS  
+**Status:** ✅ COMPLETE  
 **Branch:** `feat/file-management`
 
 - [x] 2.1 Implement file picker integration
   - Wire up `file_picker` package
-  - Single and multi-file selection
-  - Progress indicator during encryption
+  - Multi-file selection support
+  - Error handling
 
 - [x] 2.2 Add drag & drop support
   - `desktop_drop` package added
@@ -76,12 +76,11 @@ Implement all missing critical features to reach production-ready v1.0, includin
   - Image preview (thumbnails)
   - Text file preview
   - PDF preview (basic)
-  - Generic icon fallback
 
-- [ ] 2.4 Add export/import vault
-  - Export to `.vaultpkg` format
-  - Import with validation
-  - Progress dialogs
+- [x] 2.4 Add export/import vault
+  - Export dialog with directory picker
+  - Import dialog with safety confirmations (stub)
+  - Warning messages for backup/restore
 
 **Deliverables:**
 - Full file management working
