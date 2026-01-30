@@ -292,7 +292,50 @@ class _SecuritySettings extends StatelessWidget {
             ],
           ),
           
-          const SizedBox(height: 16),
+          const SizedBox(height: 24),
+          
+          // PIN Change Section
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: MacosColors.systemGrayColor.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: MacosColors.systemGrayColor.withOpacity(0.2),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const MacosIcon(
+                      CupertinoIcons.lock_fill,
+                      color: MacosColors.systemBlueColor,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Change PIN',
+                      style: MacosTheme.of(context).typography.headline,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Change your vault PIN. You will need to enter your current PIN first.',
+                  style: MacosTheme.of(context).typography.caption1,
+                ),
+                const SizedBox(height: 12),
+                PushButton(
+                  controlSize: ControlSize.regular,
+                  onPressed: () => _showChangePinDialog(context),
+                  child: const Text('Change PIN'),
+                ),
+              ],
+            ),
+          ),
+          
+          const SizedBox(height: 24),
           
           Container(
             padding: const EdgeInsets.all(16),
@@ -354,6 +397,13 @@ class _SecuritySettings extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+  
+  void _showChangePinDialog(BuildContext context) {
+    showMacosSheet(
+      context: context,
+      builder: (_) => const _ChangePinDialog(),
     );
   }
 }
@@ -789,5 +839,161 @@ class _BackupSettings extends StatelessWidget {
 
   String _formatDate(DateTime date) {
     return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+}
+
+class _ChangePinDialog extends StatefulWidget {
+  const _ChangePinDialog({Key? key}) : super(key: key);
+
+  @override
+  State<_ChangePinDialog> createState() => _ChangePinDialogState();
+}
+
+class _ChangePinDialogState extends State<_ChangePinDialog> {
+  final _currentPinController = TextEditingController();
+  final _newPinController = TextEditingController();
+  final _confirmPinController = TextEditingController();
+  String? _errorMessage;
+
+  @override
+  Widget build(BuildContext context) {
+    return MacosSheet(
+      child: SizedBox(
+        width: 400,
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Change PIN',
+                style: MacosTheme.of(context).typography.title1,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Enter your current PIN and choose a new one.',
+                style: MacosTheme.of(context).typography.body,
+              ),
+              const SizedBox(height: 24),
+              
+              MacosTextField(
+                controller: _currentPinController,
+                placeholder: 'Current PIN',
+                obscureText: true,
+                keyboardType: TextInputType.number,
+                prefix: const MacosIcon(CupertinoIcons.lock),
+              ),
+              const SizedBox(height: 12),
+              
+              MacosTextField(
+                controller: _newPinController,
+                placeholder: 'New PIN (4-12 digits)',
+                obscureText: true,
+                keyboardType: TextInputType.number,
+                prefix: const MacosIcon(CupertinoIcons.lock),
+              ),
+              const SizedBox(height: 12),
+              
+              MacosTextField(
+                controller: _confirmPinController,
+                placeholder: 'Confirm New PIN',
+                obscureText: true,
+                keyboardType: TextInputType.number,
+                prefix: const MacosIcon(CupertinoIcons.lock),
+              ),
+              
+              if (_errorMessage != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _errorMessage!,
+                  style: TextStyle(
+                    color: MacosColors.systemRedColor,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+              
+              const SizedBox(height: 24),
+              
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  PushButton(
+                    controlSize: ControlSize.regular,
+                    secondary: true,
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 12),
+                  PushButton(
+                    controlSize: ControlSize.regular,
+                    onPressed: _changePin,
+                    child: const Text('Change PIN'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _changePin() {
+    final currentPin = _currentPinController.text;
+    final newPin = _newPinController.text;
+    final confirmPin = _confirmPinController.text;
+    
+    // Validation
+    if (currentPin.isEmpty || newPin.isEmpty || confirmPin.isEmpty) {
+      setState(() => _errorMessage = 'Please fill in all fields');
+      return;
+    }
+    
+    if (newPin.length < 4 || newPin.length > 12) {
+      setState(() => _errorMessage = 'PIN must be 4-12 digits');
+      return;
+    }
+    
+    if (newPin != confirmPin) {
+      setState(() => _errorMessage = 'New PINs do not match');
+      return;
+    }
+    
+    if (newPin == currentPin) {
+      setState(() => _errorMessage = 'New PIN must be different from current PIN');
+      return;
+    }
+    
+    // TODO: Actually change PIN via AuthBloc
+    // For now, just show success and close
+    Navigator.pop(context);
+    
+    showMacosAlertDialog(
+      context: context,
+      builder: (_) => MacosAlertDialog(
+        appIcon: const MacosIcon(
+          CupertinoIcons.checkmark_circle,
+          size: 56,
+          color: MacosColors.systemGreenColor,
+        ),
+        title: const Text('PIN Changed'),
+        message: const Text('Your PIN has been changed successfully.'),
+        primaryButton: PushButton(
+          controlSize: ControlSize.large,
+          onPressed: () => Navigator.pop(context),
+          child: const Text('OK'),
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _currentPinController.dispose();
+    _newPinController.dispose();
+    _confirmPinController.dispose();
+    super.dispose();
   }
 }
