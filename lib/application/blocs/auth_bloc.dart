@@ -27,11 +27,12 @@ class LockRequested extends AuthEvent {}
 
 class SetupCompleted extends AuthEvent {
   final String pin;
+  final String recoveryKey;
 
-  const SetupCompleted({required this.pin});
+  const SetupCompleted({required this.pin, required this.recoveryKey});
 
   @override
-  List<Object?> get props => [pin];
+  List<Object?> get props => [pin, recoveryKey];
 }
 
 class AppUnfocused extends AuthEvent {}
@@ -245,7 +246,10 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     emit(AuthLoading());
     
     try {
-      final result = await _cryptoService.initializeWithPin(event.pin);
+      final result = await _cryptoService.initializeWithPin(
+        event.pin,
+        recoveryKey: event.recoveryKey,
+      );
       
       // Store keys in keychain
       await _keychainService.storeWrappedMasterKey(result.wrappedMasterKey);
