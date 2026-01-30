@@ -10,6 +10,7 @@ docs/
 ├── 02-research/         # Research, analysis, and comparisons
 ├── 03-design/           # Architecture and design documents
 ├── 04-reference/        # Code snippets and reference materials
+├── 05-reviews/          # Code reviews and audit reports
 └── archive/             # Old versions and drafts
 ```
 
@@ -35,6 +36,11 @@ docs/
 | File | Description |
 |------|-------------|
 | [macos-ui-code-snippets.md](./04-reference/macos-ui-code-snippets.md) | macos_ui widget examples and code patterns |
+
+### 05-reviews/ - Code Reviews
+| File | Description |
+|------|-------------|
+| [code-review-2026-01-30.md](./05-reviews/code-review-2026-01-30.md) | Comprehensive code review: features, completeness, issues |
 
 ### archive/ - Old Versions
 | File | Description |
