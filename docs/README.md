@@ -37,10 +37,11 @@ docs/
 |------|-------------|
 | [macos-ui-code-snippets.md](./04-reference/macos-ui-code-snippets.md) | macos_ui widget examples and code patterns |
 
-### 05-reviews/ - Code Reviews
+### 05-reviews/ - Code Reviews & Process
 | File | Description |
 |------|-------------|
 | [code-review-2026-01-30.md](./05-reviews/code-review-2026-01-30.md) | Comprehensive code review: features, completeness, issues |
+| [git-workflow-guide.md](./05-reviews/git-workflow-guide.md) | Git branching strategy and workflow |
 
 ### archive/ - Old Versions
 | File | Description |
