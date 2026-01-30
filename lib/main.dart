@@ -221,15 +221,47 @@ class _AppWindowState extends State<AppWindow> with WindowListener, TrayListener
         }
       },
       builder: (context, state) {
-        return MacosWindow(
-          disableWallpaperTinting: false,
-          titleBar: TitleBar(
-            title: const Text('Secure File Vault'),
+        return CallbackShortcuts(
+          bindings: <ShortcutActivator, VoidCallback>{
+            // ⌘L - Lock vault
+            const SingleActivator(LogicalKeyboardKey.keyL, meta: true): () {
+              if (state is AuthAuthenticated) {
+                context.read<AuthBloc>().add(LockRequested());
+              }
+            },
+            // ⌘O - Add files
+            const SingleActivator(LogicalKeyboardKey.keyO, meta: true): () {
+              if (state is AuthAuthenticated) {
+                context.read<VaultBloc>().add(AddFilesRequested());
+              }
+            },
+            // ⌘, - Settings
+            const SingleActivator(LogicalKeyboardKey.comma, meta: true): () {
+              _showSettings(context);
+            },
+            // ⌘Q - Quit (handled by macOS, but we can add custom behavior if needed)
+          },
+          child: MacosWindow(
+            disableWallpaperTinting: false,
+            titleBar: TitleBar(
+              title: const Text('Secure File Vault'),
+            ),
+            sidebar: _buildSidebar(context, state),
+            child: _buildContent(state),
           ),
-          sidebar: _buildSidebar(context, state),
-          child: _buildContent(state),
         );
       },
+    );
+  }
+  
+  void _showSettings(BuildContext context) {
+    showMacosSheet(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => BlocProvider.value(
+        value: context.read<SettingsBloc>(),
+        child: const SettingsScreen(),
+      ),
     );
   }
 
@@ -343,6 +375,9 @@ class _AppWindowState extends State<AppWindow> with WindowListener, TrayListener
         onUnlock: (pin) {
           context.read<AuthBloc>().add(UnlockRequested(pin: pin));
         },
+        onBiometricUnlock: () {
+          context.read<AuthBloc>().add(BiometricUnlockRequested());
+        },
       );
     }
 
@@ -352,17 +387,6 @@ class _AppWindowState extends State<AppWindow> with WindowListener, TrayListener
 
     return const Center(
       child: Text('Unknown state'),
-    );
-  }
-
-  void _showSettings(BuildContext context) {
-    showMacosSheet(
-      context: context,
-      barrierDismissible: true,
-      builder: (_) => BlocProvider.value(
-        value: context.read<SettingsBloc>(),
-        child: const SettingsScreen(),
-      ),
     );
   }
 }

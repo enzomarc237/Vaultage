@@ -23,6 +23,8 @@ class UnlockRequested extends AuthEvent {
   List<Object?> get props => [pin];
 }
 
+class BiometricUnlockRequested extends AuthEvent {}
+
 class LockRequested extends AuthEvent {}
 
 class SetupCompleted extends AuthEvent {
@@ -137,6 +139,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
        super(AuthInitial()) {
     on<AuthCheckRequested>(_onAuthCheckRequested);
     on<UnlockRequested>(_onUnlockRequested);
+    on<BiometricUnlockRequested>(_onBiometricUnlockRequested);
     on<LockRequested>(_onLockRequested);
     on<SetupCompleted>(_onSetupCompleted);
     on<AppUnfocused>(_onAppUnfocused);
@@ -226,6 +229,37 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       }
     } catch (e) {
       emit(AuthFailure(message: 'Authentication error: $e'));
+      emit(const AuthLocked(attemptsRemaining: maxAttempts));
+    }
+  }
+
+  Future<void> _onBiometricUnlockRequested(
+    BiometricUnlockRequested event,
+    Emitter<AuthState> emit,
+  ) async {
+    emit(AuthLoading());
+    
+    try {
+      final wrappedKey = await _keychainService.getWrappedMasterKey();
+      
+      if (wrappedKey == null) {
+        emit(const AuthFailure(message: 'Vault not properly initialized'));
+        emit(const AuthLocked(attemptsRemaining: maxAttempts));
+        return;
+      }
+      
+      // Biometric auth already succeeded in UI, just need to unlock vault
+      // The wrapped key is retrieved from keychain after biometric auth
+      _cryptoService.unlockWithBiometricKey(wrappedKey);
+      
+      // Reset failed attempts
+      _failedAttempts = 0;
+      _lockoutEndTime = null;
+      
+      await _keychainService.recordLockEvent();
+      emit(AuthAuthenticated(authenticatedAt: DateTime.now()));
+    } catch (e) {
+      emit(AuthFailure(message: 'Biometric unlock failed: $e'));
       emit(const AuthLocked(attemptsRemaining: maxAttempts));
     }
   }
