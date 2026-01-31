@@ -17,13 +17,13 @@ import 'presentation/screens/screens.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // Initialize window manager
   await windowManager.ensureInitialized();
-  
+
   // Configure macOS window for modern translucent look
   await _configureMacOSWindow();
-  
+
   // Configure window options
   WindowOptions windowOptions = const WindowOptions(
     size: Size(1200, 800),
@@ -39,22 +39,20 @@ void main() async {
     await windowManager.show();
     await windowManager.focus();
   });
-  
+
   // Initialize tray
   await trayManager.setIcon('assets/tray_icon.png');
-  
+
   // Set preferred orientations
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-  ]);
-  
+  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+
   runApp(const SecureFileVaultApp());
 }
 
 /// This method initializes macos_window_utils and styles the window.
 Future<void> _configureMacOSWindow() async {
   if (!Platform.isMacOS) return;
-  
+
   // Configure macOS window for modern translucent look
   const config = MacosWindowUtilsConfig(
     toolbarStyle: NSWindowToolbarStyle.unified,
@@ -71,7 +69,10 @@ class SecureFileVaultApp extends StatelessWidget {
       providers: [
         RepositoryProvider(create: (_) => KeychainService()),
         RepositoryProvider(create: (_) => CryptoService()),
-        RepositoryProvider(create: (_) => FileRepository()),
+        RepositoryProvider(
+          create: (context) =>
+              FileRepository(cryptoService: context.read<CryptoService>()),
+        ),
         RepositoryProvider(create: (_) => SettingsRepository()),
         RepositoryProvider(
           create: (context) => AutoDestructionService(
@@ -87,6 +88,7 @@ class SecureFileVaultApp extends StatelessWidget {
             create: (context) => AuthBloc(
               keychainService: context.read<KeychainService>(),
               cryptoService: context.read<CryptoService>(),
+              autoDestructionService: context.read<AutoDestructionService>(),
             )..add(AuthCheckRequested()),
           ),
           BlocProvider(
@@ -121,7 +123,10 @@ class AppWindow extends StatefulWidget {
   State<AppWindow> createState() => _AppWindowState();
 }
 
-class _AppWindowState extends State<AppWindow> with WindowListener, TrayListener {
+class _AppWindowState extends State<AppWindow>
+    with WindowListener, TrayListener {
+  int _sidebarIndex = 0;
+
   @override
   void initState() {
     super.initState();
@@ -134,20 +139,16 @@ class _AppWindowState extends State<AppWindow> with WindowListener, TrayListener
     await trayManager.setContextMenu(
       Menu(
         items: [
-          MenuItem(
-            key: 'show',
-            label: 'Show Secure Vault',
-          ),
+          MenuItem(key: 'show', label: 'Show Secure Vault'),
+          MenuItem.separator(),
+          MenuItem(key: 'lock', label: 'Lock Vault'),
           MenuItem.separator(),
           MenuItem(
-            key: 'lock',
-            label: 'Lock Vault',
+            key: 'reset',
+            label: 'Reset All Data',
           ),
           MenuItem.separator(),
-          MenuItem(
-            key: 'quit',
-            label: 'Quit',
-          ),
+          MenuItem(key: 'quit', label: 'Quit'),
         ],
       ),
     );
@@ -190,6 +191,9 @@ class _AppWindowState extends State<AppWindow> with WindowListener, TrayListener
         break;
       case 'lock':
         context.read<AuthBloc>().add(LockRequested());
+        break;
+      case 'reset':
+        _showResetConfirmation(context);
         break;
       case 'quit':
         windowManager.close();
@@ -243,17 +247,19 @@ class _AppWindowState extends State<AppWindow> with WindowListener, TrayListener
           },
           child: MacosWindow(
             disableWallpaperTinting: false,
-            titleBar: TitleBar(
-              title: const Text('Secure File Vault'),
-            ),
+            titleBar: TitleBar(title: const Text('Secure File Vault')),
             sidebar: _buildSidebar(context, state),
-            child: _buildContent(state),
+            child: Builder(
+              builder: (context) {
+                return _buildContent(state);
+              },
+            ),
           ),
         );
       },
     );
   }
-  
+
   void _showSettings(BuildContext context) {
     showMacosSheet(
       context: context,
@@ -265,107 +271,108 @@ class _AppWindowState extends State<AppWindow> with WindowListener, TrayListener
     );
   }
 
-  Widget _buildWindowActions(BuildContext context, AuthState state) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (state is AuthAuthenticated) ...[
-          MacosIconButton(
-            icon: const MacosIcon(CupertinoIcons.lock),
-            onPressed: () => context.read<AuthBloc>().add(LockRequested()),
-          ),
-          const SizedBox(width: 8),
-          MacosIconButton(
-            icon: const MacosIcon(CupertinoIcons.plus),
-            onPressed: () => context.read<VaultBloc>().add(AddFilesRequested()),
-          ),
-          const SizedBox(width: 8),
-        ],
-        MacosIconButton(
-          icon: const MacosIcon(CupertinoIcons.gear),
-          onPressed: () => _showSettings(context),
-        ),
-      ],
-    );
-  }
-
   Sidebar _buildSidebar(BuildContext context, AuthState state) {
     final isAuthenticated = state is AuthAuthenticated;
-    
+
+    // Build sidebar items based on auth state
+    final List<SidebarItem> sidebarItems = [
+      SidebarItem(
+        leading: MacosIcon(
+          isAuthenticated
+              ? CupertinoIcons.lock_open_fill
+              : CupertinoIcons.lock_fill,
+          color: isAuthenticated
+              ? MacosColors.systemGreenColor
+              : MacosColors.systemRedColor,
+        ),
+        label: Text(isAuthenticated ? 'Vault Unlocked' : 'Vault Locked'),
+      ),
+      if (isAuthenticated)
+        const SidebarItem(
+          leading: MacosIcon(CupertinoIcons.folder_fill),
+          label: Text('All Files'),
+        ),
+      const SidebarItem(
+        leading: MacosIcon(CupertinoIcons.settings),
+        label: Text('Settings'),
+      ),
+    ];
+
+    // Adjust index if needed when auth state changes
+    if (_sidebarIndex >= sidebarItems.length) {
+      _sidebarIndex = 0;
+    }
+
     return Sidebar(
       minWidth: 200,
       maxWidth: 300,
       startWidth: 250,
       builder: (context, scrollController) {
         return SidebarItems(
-          currentIndex: 0,
-          onChanged: (index) {},
+          currentIndex: _sidebarIndex,
+          onChanged: (index) {
+            setState(() {
+              _sidebarIndex = index;
+            });
+            // Handle navigation based on index
+            if (isAuthenticated) {
+              // Index 0 = Vault status, 1 = All Files, 2 = Settings
+              if (index == 2) {
+                // Settings selected
+                _showSettings(context);
+              }
+            } else {
+              // Index 0 = Vault status, 1 = Settings
+              if (index == 1) {
+                _showSettings(context);
+              }
+            }
+          },
           scrollController: scrollController,
           itemSize: SidebarItemSize.large,
-          items: [
-            SidebarItem(
-              leading: MacosIcon(
-                isAuthenticated 
-                  ? CupertinoIcons.lock_open_fill 
-                  : CupertinoIcons.lock_fill,
-                color: isAuthenticated 
-                  ? MacosColors.systemGreenColor 
-                  : MacosColors.systemRedColor,
-              ),
-              label: Text(isAuthenticated ? 'Vault Unlocked' : 'Vault Locked'),
-            ),
-            if (isAuthenticated)
-              const SidebarItem(
-                leading: MacosIcon(CupertinoIcons.folder_fill),
-                label: Text('All Files'),
-              ),
-            const SidebarItem(
-              leading: MacosIcon(CupertinoIcons.settings),
-              label: Text('Settings'),
-            ),
-          ],
+          items: sidebarItems,
         );
       },
       bottom: isAuthenticated
-        ? Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Row(
-              children: [
-                const MacosIcon(
-                  CupertinoIcons.checkmark_shield_fill,
-                  color: MacosColors.systemGreenColor,
-                  size: 16,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Protected by AES-256',
-                    style: MacosTheme.of(context).typography.caption1.copyWith(
-                      color: MacosColors.systemGreenColor,
+          ? Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Row(
+                children: [
+                  const MacosIcon(
+                    CupertinoIcons.checkmark_shield_fill,
+                    color: MacosColors.systemGreenColor,
+                    size: 16,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Protected by AES-256',
+                      style: MacosTheme.of(context)
+                          .typography
+                          .caption1
+                          .copyWith(color: MacosColors.systemGreenColor),
                     ),
                   ),
-                ),
-              ],
-            ),
-          )
-        : null,
+                ],
+              ),
+            )
+          : null,
     );
   }
 
   Widget _buildContent(AuthState state) {
     if (state is AuthInitial || state is AuthLoading) {
-      return const Center(
-        child: ProgressCircle(),
-      );
+      return const Center(child: ProgressCircle());
     }
 
     if (state is AuthNeedsSetup) {
-      return SetupScreen(onComplete: (pin, recoveryKey) {
-        context.read<AuthBloc>().add(SetupCompleted(
-          pin: pin,
-          recoveryKey: recoveryKey,
-        ));
-      });
+      return SetupScreen(
+        onComplete: (pin, recoveryKey) {
+          context.read<AuthBloc>().add(
+                SetupCompleted(pin: pin, recoveryKey: recoveryKey),
+              );
+        },
+      );
     }
 
     if (state is AuthLocked || state is AuthFailure) {
@@ -382,11 +389,84 @@ class _AppWindowState extends State<AppWindow> with WindowListener, TrayListener
     }
 
     if (state is AuthAuthenticated) {
-      return const VaultScreen();
+      switch (_sidebarIndex) {
+        case 0:
+          return const VaultStatusScreen();
+        case 1:
+          return const VaultScreen();
+        default:
+          return const VaultScreen();
+      }
     }
 
-    return const Center(
-      child: Text('Unknown state'),
+    return const Center(child: Text('Unknown state'));
+  }
+
+  void _showResetConfirmation(BuildContext context) {
+    // Ensure window is visible to show dialog
+    windowManager.show();
+    windowManager.focus();
+
+    showMacosAlertDialog(
+      context: context,
+      builder: (context) => MacosAlertDialog(
+        appIcon: const MacosIcon(
+          CupertinoIcons.trash_fill,
+          color: MacosColors.systemRedColor,
+          size: 56,
+        ),
+        title: const Text('Reset All Data?'),
+        message: const Text(
+          'This will permanently delete all files in the vault, clear your master password, recovery key, and reset all settings.\n\nThis action CANNOT be undone.',
+        ),
+        primaryButton: PushButton(
+          controlSize: ControlSize.large,
+          color: MacosColors.systemRedColor,
+          onPressed: () {
+            Navigator.pop(context);
+            _showFinalConfirmation(context);
+          },
+          child: const Text('Reset Everything'),
+        ),
+        secondaryButton: PushButton(
+          controlSize: ControlSize.large,
+          secondary: true,
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+      ),
+    );
+  }
+
+  void _showFinalConfirmation(BuildContext context) {
+    showMacosAlertDialog(
+      context: context,
+      builder: (context) => MacosAlertDialog(
+        appIcon: const MacosIcon(
+          CupertinoIcons.exclamationmark_shield_fill,
+          color: MacosColors.systemRedColor,
+          size: 56,
+        ),
+        title: const Text('Final Confirmation'),
+        message: const Text(
+          'Are you absolutely sure? Everything will be lost forever.',
+        ),
+        primaryButton: PushButton(
+          controlSize: ControlSize.large,
+          color: MacosColors.systemRedColor,
+          onPressed: () {
+            Navigator.pop(context);
+            context.read<AuthBloc>().add(ResetAllRequested());
+          },
+          child: const Text('I am sure, Reset Now'),
+        ),
+        secondaryButton: PushButton(
+          controlSize: ControlSize.large,
+          secondary: true,
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+      ),
     );
   }
 }

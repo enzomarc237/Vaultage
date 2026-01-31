@@ -44,12 +44,29 @@ class _VaultScreenState extends State<VaultScreen> {
           toolBar: ToolBar(
             title: Text(_getTitle(state)),
             titleWidth: 200,
-            leading: MacosTooltip(
-              message: 'Lock Vault (⌘L)',
-              child: MacosIconButton(
-                icon: const MacosIcon(CupertinoIcons.lock),
-                onPressed: () => context.read<AuthBloc>().add(LockRequested()),
-              ),
+            leading: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Toggle Sidebar Button
+                MacosTooltip(
+                  message: 'Toggle Sidebar',
+                  child: MacosIconButton(
+                    icon: const MacosIcon(CupertinoIcons.sidebar_left),
+                    onPressed: () {
+                      MacosWindowScope.of(context).toggleSidebar();
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                MacosTooltip(
+                  message: 'Lock Vault (⌘L)',
+                  child: MacosIconButton(
+                    icon: const MacosIcon(CupertinoIcons.lock),
+                    onPressed: () =>
+                        context.read<AuthBloc>().add(LockRequested()),
+                  ),
+                ),
+              ],
             ),
             actions: [
               ToolBarIconButton(
@@ -82,110 +99,44 @@ class _VaultScreenState extends State<VaultScreen> {
                     title: const Text('Select All'),
                     onTap: () {},
                   ),
+                  const MacosPulldownMenuDivider(),
+                  MacosPulldownMenuItem(
+                    title: const Text(
+                      'Reset Vault',
+                      style: TextStyle(color: MacosColors.systemRedColor),
+                    ),
+                    onTap: () => _showResetConfirmation(context),
+                  ),
                 ],
               ),
             ],
           ),
           children: [
-            DropTarget(
-              onDragDone: (details) {
-                final files = details.files
-                    .where((f) => f.path != null)
-                    .map((f) => f.path!)
-                    .toList();
-                if (files.isNotEmpty) {
-                  context.read<VaultBloc>().add(AddFilesRequested(filePaths: files));
-                }
-                setState(() => _isDragging = false);
-              },
-              onDragEntered: (_) => setState(() => _isDragging = true),
-              onDragExited: (_) => setState(() => _isDragging = false),
-              child: ContentArea(
-                builder: (context, scrollController) {
-                  Widget content;
-                  
-                  if (state is VaultLoading || state is VaultInitial) {
-                    content = const Center(child: ProgressCircle());
-                  } else if (state is VaultError && state is! VaultLoaded) {
-                    content = Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const MacosIcon(
-                            CupertinoIcons.exclamationmark_triangle_fill,
-                            size: 48,
-                            color: MacosColors.systemRedColor,
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'Error loading vault',
-                            style: MacosTheme.of(context).typography.title2,
-                          ),
-                          const SizedBox(height: 8),
-                          Text((state as VaultError).message),
-                          const SizedBox(height: 16),
-                          PushButton(
-                            controlSize: ControlSize.regular,
-                            onPressed: () {
-                              context.read<VaultBloc>().add(VaultLoadRequested());
-                            },
-                            child: const Text('Retry'),
-                          ),
-                        ],
-                      ),
-                    );
-                  } else if (state is VaultLoaded || state is VaultFileAdding || state is VaultFileDecrypting) {
-                    final files = state is VaultLoaded 
-                      ? state.files 
-                      : (state as dynamic).files ?? [];
-                    
-                    if (files.isEmpty) {
-                      content = _buildEmptyState();
-                    } else {
-                      content = _buildFileGrid(files, state);
+            ContentArea(
+              builder: (context, scrollController) {
+                return DropTarget(
+                  onDragDone: (details) {
+                    final files = details.files
+                        .where((f) => f.path != null)
+                        .map((f) => f.path!)
+                        .toList();
+                    if (files.isNotEmpty) {
+                      context.read<VaultBloc>().add(
+                        AddFilesRequested(filePaths: files),
+                      );
                     }
-                  } else {
-                    content = const Center(child: Text('Unknown state'));
-                  }
-                  
-                  // Show drag overlay when dragging files
-                  if (_isDragging) {
-                    return Container(
-                      color: MacosColors.systemBlueColor.withOpacity(0.1),
-                      child: Center(
-                        child: Container(
-                          padding: const EdgeInsets.all(32),
-                          decoration: BoxDecoration(
-                            color: MacosColors.systemBlueColor.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: MacosColors.systemBlueColor,
-                              width: 2,
-                            ),
-                          ),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const MacosIcon(
-                                CupertinoIcons.arrow_down_doc,
-                                size: 64,
-                                color: MacosColors.systemBlueColor,
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                'Drop files here to encrypt',
-                                style: MacosTheme.of(context).typography.title1,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    );
-                  }
-                  
-                  return content;
-                },
-              ),
+                    setState(() => _isDragging = false);
+                  },
+                  onDragEntered: (_) => setState(() => _isDragging = true),
+                  onDragExited: (_) => setState(() => _isDragging = false),
+                  child: Stack(
+                    children: [
+                      _buildMainContent(state),
+                      if (_isDragging) _buildDragOverlay(context),
+                    ],
+                  ),
+                );
+              },
             ),
             if (_selectedFileId.isNotEmpty)
               ResizablePane(
@@ -263,7 +214,7 @@ class _VaultScreenState extends State<VaultScreen> {
 
   Widget _buildFileGrid(List<dynamic> files, VaultState state) {
     final isLoading = state is VaultFileAdding || state is VaultFileDecrypting;
-    
+
     return Stack(
       children: [
         Padding(
@@ -279,7 +230,7 @@ class _VaultScreenState extends State<VaultScreen> {
             itemBuilder: (context, index) {
               final file = files[index];
               final isSelected = file.id == _selectedFileId;
-              
+
               return GestureDetector(
                 onTap: () {
                   setState(() {
@@ -294,13 +245,13 @@ class _VaultScreenState extends State<VaultScreen> {
                 child: Container(
                   decoration: BoxDecoration(
                     color: isSelected
-                      ? const Color.fromRGBO(0, 122, 255, 0.1)
-                      : const Color.fromRGBO(128, 128, 128, 0.05),
+                        ? const Color.fromRGBO(0, 122, 255, 0.1)
+                        : const Color.fromRGBO(128, 128, 128, 0.05),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
                       color: isSelected
-                        ? MacosColors.systemBlueColor
-                        : MacosColors.systemGrayColor.withOpacity(0.2),
+                          ? MacosColors.systemBlueColor
+                          : MacosColors.systemGrayColor.withOpacity(0.2),
                       width: isSelected ? 2 : 1,
                     ),
                   ),
@@ -326,9 +277,9 @@ class _VaultScreenState extends State<VaultScreen> {
                       const SizedBox(height: 4),
                       Text(
                         _formatFileSize(file.size),
-                        style: MacosTheme.of(context).typography.caption1.copyWith(
-                          color: Colors.grey,
-                        ),
+                        style: MacosTheme.of(
+                          context,
+                        ).typography.caption1.copyWith(color: Colors.grey),
                       ),
                     ],
                   ),
@@ -337,13 +288,11 @@ class _VaultScreenState extends State<VaultScreen> {
             },
           ),
         ),
-        
+
         if (isLoading)
           Container(
             color: MacosColors.windowBackgroundColor.withOpacity(0.8),
-            child: const Center(
-              child: ProgressCircle(),
-            ),
+            child: const Center(child: ProgressCircle()),
           ),
       ],
     );
@@ -353,14 +302,14 @@ class _VaultScreenState extends State<VaultScreen> {
     return BlocBuilder<VaultBloc, VaultState>(
       builder: (context, state) {
         if (state is! VaultLoaded) return const SizedBox.shrink();
-        
+
         final file = state.files.firstWhere(
           (f) => f.id == _selectedFileId,
           orElse: () => null as dynamic,
         );
-        
+
         if (file == null) return const SizedBox.shrink();
-        
+
         return Container(
           color: const Color.fromRGBO(240, 240, 240, 1),
           padding: const EdgeInsets.all(16),
@@ -404,7 +353,8 @@ class _VaultScreenState extends State<VaultScreen> {
               PushButton(
                 controlSize: ControlSize.large,
                 secondary: true,
-                onPressed: () => _showDeleteConfirmation(file.id, file.filename),
+                onPressed: () =>
+                    _showDeleteConfirmation(file.id, file.filename),
                 child: const Text('Delete'),
               ),
             ],
@@ -430,10 +380,7 @@ class _VaultScreenState extends State<VaultScreen> {
             ),
           ),
           Expanded(
-            child: Text(
-              value,
-              style: MacosTheme.of(context).typography.body,
-            ),
+            child: Text(value, style: MacosTheme.of(context).typography.body),
           ),
         ],
       ),
@@ -442,7 +389,7 @@ class _VaultScreenState extends State<VaultScreen> {
 
   IconData _getFileIcon(String? mimeType) {
     if (mimeType == null) return CupertinoIcons.doc;
-    
+
     if (mimeType.startsWith('image/')) {
       return CupertinoIcons.photo;
     } else if (mimeType.startsWith('video/')) {
@@ -456,14 +403,15 @@ class _VaultScreenState extends State<VaultScreen> {
     } else if (mimeType.contains('zip') || mimeType.contains('archive')) {
       return CupertinoIcons.archivebox;
     }
-    
+
     return CupertinoIcons.doc;
   }
 
   String _formatFileSize(int bytes) {
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    if (bytes < 1024 * 1024 * 1024)
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
 
@@ -550,15 +498,17 @@ class _VaultScreenState extends State<VaultScreen> {
         allowMultiple: true,
         type: FileType.any,
       );
-      
+
       if (result != null && result.files.isNotEmpty) {
         final filePaths = result.files
             .where((f) => f.path != null)
             .map((f) => f.path!)
             .toList();
-        
+
         if (filePaths.isNotEmpty) {
-          context.read<VaultBloc>().add(AddFilesRequested(filePaths: filePaths));
+          context.read<VaultBloc>().add(
+            AddFilesRequested(filePaths: filePaths),
+          );
         }
       }
     } catch (e) {
@@ -608,10 +558,7 @@ class _VaultScreenState extends State<VaultScreen> {
     final shouldProceed = await showMacosAlertDialog<bool>(
       context: context,
       builder: (_) => MacosAlertDialog(
-        appIcon: const MacosIcon(
-          CupertinoIcons.arrow_up_doc,
-          size: 56,
-        ),
+        appIcon: const MacosIcon(CupertinoIcons.arrow_up_doc, size: 56),
         title: const Text('Export Vault'),
         message: const Text(
           'Export your entire encrypted vault for backup. '
@@ -631,29 +578,28 @@ class _VaultScreenState extends State<VaultScreen> {
         ),
       ),
     );
-    
+
     if (shouldProceed != true) return;
-    
+
     // Pick destination directory
     final result = await FilePicker.platform.getDirectoryPath(
       dialogTitle: 'Select Backup Destination',
     );
-    
+
     if (result == null) return;
-    
+
     // Trigger export
-    context.read<VaultBloc>().add(VaultExportRequested(destinationPath: result));
+    context.read<VaultBloc>().add(
+      VaultExportRequested(destinationPath: result),
+    );
   }
-  
+
   Future<void> _showImportDialog() async {
     // Show info first
     final shouldProceed = await showMacosAlertDialog<bool>(
       context: context,
       builder: (_) => MacosAlertDialog(
-        appIcon: const MacosIcon(
-          CupertinoIcons.arrow_down_doc,
-          size: 56,
-        ),
+        appIcon: const MacosIcon(CupertinoIcons.arrow_down_doc, size: 56),
         title: const Text('Import Vault'),
         message: const Text(
           'Import a previously exported vault.\n\n'
@@ -673,20 +619,22 @@ class _VaultScreenState extends State<VaultScreen> {
         ),
       ),
     );
-    
+
     if (shouldProceed != true) return;
-    
+
     // Pick vault package file
     final result = await FilePicker.platform.pickFiles(
       type: FileType.any,
       allowMultiple: false,
       dialogTitle: 'Select Vault Backup',
     );
-    
-    if (result == null || result.files.isEmpty || result.files.first.path == null) {
+
+    if (result == null ||
+        result.files.isEmpty ||
+        result.files.first.path == null) {
       return;
     }
-    
+
     // Show confirmation
     final confirmImport = await showMacosAlertDialog<bool>(
       context: context,
@@ -714,7 +662,7 @@ class _VaultScreenState extends State<VaultScreen> {
         ),
       ),
     );
-    
+
     if (confirmImport == true) {
       // TODO: Implement import vault
       _showError('Import not yet implemented. This feature is coming soon.');
@@ -740,4 +688,158 @@ class _VaultScreenState extends State<VaultScreen> {
       ),
     );
   }
+
+  Widget _buildMainContent(VaultState state) {
+    if (state is VaultInitial || state is VaultLoading) {
+      return const Center(child: ProgressCircle());
+    }
+
+    if (state is VaultError && state is! VaultLoaded) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const MacosIcon(
+              CupertinoIcons.exclamationmark_triangle_fill,
+              size: 48,
+              color: MacosColors.systemRedColor,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Error loading vault',
+              style: MacosTheme.of(context).typography.title2,
+            ),
+            const SizedBox(height: 8),
+            Text(state.message),
+            const SizedBox(height: 16),
+            PushButton(
+              controlSize: ControlSize.regular,
+              onPressed: () {
+                context.read<VaultBloc>().add(VaultLoadRequested());
+              },
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    List<VaultFile> files = [];
+    if (state is VaultLoaded) {
+      files = state.files;
+    } else if (state is VaultSearchResults) {
+      files = state.results;
+    } else if (state is VaultFileAdding) {
+      files = state.files;
+    } else if (state is VaultFileDecrypting) {
+      files = state.files;
+    } else if (state is VaultFileDecrypted) {
+      files = state.files;
+    } else if (state is VaultFileDeleting) {
+      files = state.files;
+    } else if (state is VaultFileDeleted) {
+      files = state.files;
+    }
+
+    if (files.isEmpty && state is! VaultSearchResults) {
+      return _buildEmptyState();
+    }
+
+    return _buildFileGrid(files, state);
+  }
+
+  Widget _buildDragOverlay(BuildContext context) {
+    return Container(
+      color: MacosColors.systemBlueColor.withOpacity(0.1),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.all(32),
+          decoration: BoxDecoration(
+            color: MacosColors.systemBlueColor.withOpacity(0.2),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: MacosColors.systemBlueColor, width: 2),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const MacosIcon(
+                CupertinoIcons.arrow_down_doc,
+                size: 64,
+                color: MacosColors.systemBlueColor,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Drop files here to encrypt',
+                style: MacosTheme.of(context).typography.title1,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+  void _showResetConfirmation(BuildContext context) {
+    showMacosAlertDialog(
+      context: context,
+      builder: (context) => MacosAlertDialog(
+        appIcon: const MacosIcon(
+          CupertinoIcons.trash_fill,
+          color: MacosColors.systemRedColor,
+          size: 56,
+        ),
+        title: const Text('Reset All Data?'),
+        message: const Text(
+          'This will permanently delete all files in the vault, clear your master password, recovery key, and reset all settings.\n\nThis action CANNOT be undone.',
+        ),
+        primaryButton: PushButton(
+          controlSize: ControlSize.large,
+          color: MacosColors.systemRedColor,
+          onPressed: () {
+            Navigator.pop(context);
+            _showFinalConfirmation(context);
+          },
+          child: const Text('Reset Everything'),
+        ),
+        secondaryButton: PushButton(
+          controlSize: ControlSize.large,
+          secondary: true,
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+      ),
+    );
+  }
+
+  void _showFinalConfirmation(BuildContext context) {
+    showMacosAlertDialog(
+      context: context,
+      builder: (context) => MacosAlertDialog(
+        appIcon: const MacosIcon(
+          CupertinoIcons.exclamationmark_shield_fill,
+          color: MacosColors.systemRedColor,
+          size: 56,
+        ),
+        title: const Text('Final Confirmation'),
+        message: const Text(
+          'Are you absolutely sure? Everything will be lost forever.',
+        ),
+        primaryButton: PushButton(
+          controlSize: ControlSize.large,
+          color: MacosColors.systemRedColor,
+          onPressed: () {
+            Navigator.pop(context);
+            context.read<AuthBloc>().add(ResetAllRequested());
+          },
+          child: const Text('I am sure, Reset Now'),
+        ),
+        secondaryButton: PushButton(
+          controlSize: ControlSize.large,
+          secondary: true,
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+      ),
+    );
+  }
 }
+

@@ -43,10 +43,7 @@ class FileDeleteRequested extends VaultEvent {
   final String fileId;
   final bool secureDelete;
 
-  const FileDeleteRequested({
-    required this.fileId,
-    this.secureDelete = true,
-  });
+  const FileDeleteRequested({required this.fileId, this.secureDelete = true});
 
   @override
   List<Object?> get props => [fileId, secureDelete];
@@ -101,66 +98,74 @@ class VaultLoaded extends VaultState {
 
 class VaultFileDecrypting extends VaultState {
   final String fileId;
+  final List<VaultFile> files;
 
-  const VaultFileDecrypting({required this.fileId});
+  const VaultFileDecrypting({required this.fileId, required this.files});
 
   @override
-  List<Object?> get props => [fileId];
+  List<Object?> get props => [fileId, files];
 }
 
 class VaultFileDecrypted extends VaultState {
   final String fileId;
   final Uint8List data;
   final FileMetadata metadata;
+  final List<VaultFile> files;
 
   const VaultFileDecrypted({
     required this.fileId,
     required this.data,
     required this.metadata,
+    required this.files,
   });
 
   @override
-  List<Object?> get props => [fileId, data, metadata];
+  List<Object?> get props => [fileId, data, metadata, files];
 }
 
 class VaultFileAdding extends VaultState {
   final int current;
   final int total;
+  final List<VaultFile> files;
 
   const VaultFileAdding({
     required this.current,
     required this.total,
+    required this.files,
   });
 
   @override
-  List<Object?> get props => [current, total];
+  List<Object?> get props => [current, total, files];
 }
 
 class VaultFileAdded extends VaultState {
   final VaultFile file;
+  final List<VaultFile> files;
 
-  const VaultFileAdded({required this.file});
+  const VaultFileAdded({required this.file, required this.files});
 
   @override
-  List<Object?> get props => [file];
+  List<Object?> get props => [file, files];
 }
 
 class VaultFileDeleting extends VaultState {
   final String fileId;
+  final List<VaultFile> files;
 
-  const VaultFileDeleting({required this.fileId});
+  const VaultFileDeleting({required this.fileId, required this.files});
 
   @override
-  List<Object?> get props => [fileId];
+  List<Object?> get props => [fileId, files];
 }
 
 class VaultFileDeleted extends VaultState {
   final String fileId;
+  final List<VaultFile> files;
 
-  const VaultFileDeleted({required this.fileId});
+  const VaultFileDeleted({required this.fileId, required this.files});
 
   @override
-  List<Object?> get props => [fileId];
+  List<Object?> get props => [fileId, files];
 }
 
 class VaultError extends VaultState {
@@ -185,10 +190,7 @@ class VaultSearchResults extends VaultState {
   final List<VaultFile> results;
   final String query;
 
-  const VaultSearchResults({
-    required this.results,
-    required this.query,
-  });
+  const VaultSearchResults({required this.results, required this.query});
 
   @override
   List<Object?> get props => [results, query];
@@ -236,8 +238,14 @@ class VaultFile extends Equatable {
 
   @override
   List<Object?> get props => [
-    id, filename, filenameHmac, size, 
-    createdAt, modifiedAt, mimeType, ciphertextHash,
+    id,
+    filename,
+    filenameHmac,
+    size,
+    createdAt,
+    modifiedAt,
+    mimeType,
+    ciphertextHash,
   ];
 }
 
@@ -246,7 +254,6 @@ class VaultBloc extends Bloc<VaultEvent, VaultState> {
   final FileRepository _fileRepository;
   final CryptoService _cryptoService;
 
-  
   List<VaultFile> _currentFiles = [];
   String? _vaultPath;
 
@@ -272,28 +279,38 @@ class VaultBloc extends Bloc<VaultEvent, VaultState> {
     Emitter<VaultState> emit,
   ) async {
     emit(VaultLoading());
-    
+
     try {
       _vaultPath ??= await _fileRepository.getVaultPath();
       final files = await _fileRepository.loadManifest();
-      
-      _currentFiles = files.map((f) => VaultFile(
-        id: f.id,
-        filename: f.metadata.originalName,
-        size: f.metadata.size,
-        createdAt: DateTime.fromMillisecondsSinceEpoch(f.metadata.createdAt),
-        modifiedAt: DateTime.fromMillisecondsSinceEpoch(f.metadata.modifiedAt),
-        mimeType: f.metadata.mimeType,
-        ciphertextHash: f.ciphertextHash,
-      )).toList();
-      
+
+      _currentFiles = files
+          .map(
+            (f) => VaultFile(
+              id: f.id,
+              filename: f.metadata.originalName,
+              size: f.metadata.size,
+              createdAt: DateTime.fromMillisecondsSinceEpoch(
+                f.metadata.createdAt,
+              ),
+              modifiedAt: DateTime.fromMillisecondsSinceEpoch(
+                f.metadata.modifiedAt,
+              ),
+              mimeType: f.metadata.mimeType,
+              ciphertextHash: f.ciphertextHash,
+            ),
+          )
+          .toList();
+
       final totalSize = _currentFiles.fold<int>(0, (sum, f) => sum + f.size);
-      
-      emit(VaultLoaded(
-        files: _currentFiles,
-        vaultPath: _vaultPath!,
-        totalSize: totalSize,
-      ));
+
+      emit(
+        VaultLoaded(
+          files: _currentFiles,
+          vaultPath: _vaultPath!,
+          totalSize: totalSize,
+        ),
+      );
     } catch (e) {
       emit(VaultError(message: 'Failed to load vault: $e'));
     }
@@ -307,41 +324,54 @@ class VaultBloc extends Bloc<VaultEvent, VaultState> {
       emit(const VaultError(message: 'Vault is locked'));
       return;
     }
-    
+
     List<String> filesToAdd = event.filePaths ?? [];
-    
+
     // If no paths provided, file picker would be called here
     // For now, we'll require paths to be provided
     if (filesToAdd.isEmpty) {
       emit(const VaultError(message: 'No files selected'));
       return;
     }
-    
-    emit(VaultFileAdding(current: 0, total: filesToAdd.length));
-    
+
+    emit(
+      VaultFileAdding(
+        current: 0,
+        total: filesToAdd.length,
+        files: List.from(_currentFiles),
+      ),
+    );
+
     try {
       for (var i = 0; i < filesToAdd.length; i++) {
         final filePath = filesToAdd[i];
         final file = File(filePath);
-        
+
         if (!await file.exists()) {
           continue;
         }
-        
-        emit(VaultFileAdding(current: i + 1, total: filesToAdd.length));
-        
+
+        emit(
+          VaultFileAdding(
+            current: i + 1,
+            total: filesToAdd.length,
+            files: List.from(_currentFiles),
+          ),
+        );
+
         // Read file
         final bytes = await file.readAsBytes();
         final filename = file.path.split(Platform.pathSeparator).last;
-        final mimeType = lookupMimeType(file.path) ?? 'application/octet-stream';
-        
+        final mimeType =
+            lookupMimeType(file.path) ?? 'application/octet-stream';
+
         // Encrypt file
         final encrypted = await _cryptoService.encryptFile(
           bytes,
           filename,
           mimeType,
         );
-        
+
         // Save to vault
         final vaultFile = await _fileRepository.saveFile(
           encrypted.header,
@@ -350,21 +380,27 @@ class VaultBloc extends Bloc<VaultEvent, VaultState> {
           mimeType: mimeType,
           originalSize: bytes.length,
         );
-        
+
         final newVaultFile = VaultFile(
           id: vaultFile.id,
           filename: filename,
           size: bytes.length,
-          createdAt: DateTime.fromMillisecondsSinceEpoch(vaultFile.metadata.createdAt),
-          modifiedAt: DateTime.fromMillisecondsSinceEpoch(vaultFile.metadata.modifiedAt),
+          createdAt: DateTime.fromMillisecondsSinceEpoch(
+            vaultFile.metadata.createdAt,
+          ),
+          modifiedAt: DateTime.fromMillisecondsSinceEpoch(
+            vaultFile.metadata.modifiedAt,
+          ),
           mimeType: mimeType,
           ciphertextHash: vaultFile.ciphertextHash,
         );
-        
+
         _currentFiles.add(newVaultFile);
-        emit(VaultFileAdded(file: newVaultFile));
+        emit(
+          VaultFileAdded(file: newVaultFile, files: List.from(_currentFiles)),
+        );
       }
-      
+
       // Reload vault state
       add(VaultLoadRequested());
     } catch (e) {
@@ -380,22 +416,30 @@ class VaultBloc extends Bloc<VaultEvent, VaultState> {
       emit(const VaultError(message: 'Vault is locked'));
       return;
     }
-    
-    emit(VaultFileDecrypting(fileId: event.fileId));
-    
+
+    emit(
+      VaultFileDecrypting(
+        fileId: event.fileId,
+        files: List.from(_currentFiles),
+      ),
+    );
+
     try {
       final result = await _fileRepository.loadFile(event.fileId);
-      
+
       final decrypted = await _cryptoService.decryptFile(
         result.header,
         result.ciphertext,
       );
-      
-      emit(VaultFileDecrypted(
-        fileId: event.fileId,
-        data: decrypted.plaintext,
-        metadata: decrypted.metadata,
-      ));
+
+      emit(
+        VaultFileDecrypted(
+          fileId: event.fileId,
+          data: decrypted.plaintext,
+          metadata: decrypted.metadata,
+          files: List.from(_currentFiles),
+        ),
+      );
     } catch (e) {
       emit(VaultError(message: 'Failed to decrypt file: $e'));
     }
@@ -405,8 +449,10 @@ class VaultBloc extends Bloc<VaultEvent, VaultState> {
     FileDeleteRequested event,
     Emitter<VaultState> emit,
   ) async {
-    emit(VaultFileDeleting(fileId: event.fileId));
-    
+    emit(
+      VaultFileDeleting(fileId: event.fileId, files: List.from(_currentFiles)),
+    );
+
     try {
       if (event.secureDelete) {
         // Crypto-shred: delete wrapped key from manifest
@@ -415,10 +461,12 @@ class VaultBloc extends Bloc<VaultEvent, VaultState> {
         // Regular delete
         await _fileRepository.deleteFile(event.fileId);
       }
-      
+
       _currentFiles.removeWhere((f) => f.id == event.fileId);
-      
-      emit(VaultFileDeleted(fileId: event.fileId));
+
+      emit(
+        VaultFileDeleted(fileId: event.fileId, files: List.from(_currentFiles)),
+      );
       add(VaultLoadRequested());
     } catch (e) {
       emit(VaultError(message: 'Failed to delete file: $e'));
@@ -439,13 +487,16 @@ class VaultBloc extends Bloc<VaultEvent, VaultState> {
     Emitter<VaultState> emit,
   ) async {
     emit(VaultSearching(query: event.query));
-    
+
     final query = event.query.toLowerCase();
-    final results = _currentFiles.where((f) =>
-      f.filename.toLowerCase().contains(query) ||
-      f.mimeType?.toLowerCase().contains(query) == true
-    ).toList();
-    
+    final results = _currentFiles
+        .where(
+          (f) =>
+              f.filename.toLowerCase().contains(query) ||
+              f.mimeType?.toLowerCase().contains(query) == true,
+        )
+        .toList();
+
     emit(VaultSearchResults(results: results, query: event.query));
   }
 
@@ -454,7 +505,7 @@ class VaultBloc extends Bloc<VaultEvent, VaultState> {
     Emitter<VaultState> emit,
   ) async {
     emit(VaultExporting(destinationPath: event.destinationPath));
-    
+
     try {
       await _fileRepository.exportVault(event.destinationPath);
       emit(VaultExported(destinationPath: event.destinationPath));

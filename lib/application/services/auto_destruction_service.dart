@@ -55,14 +55,14 @@ class AutoDestructionService {
     required SettingsRepository settingsRepository,
     required FileRepository fileRepository,
     required KeychainService keychainService,
-  }) : _settingsRepository = settingsRepository,
-       _fileRepository = fileRepository,
-       _keychainService = keychainService,
-       _dio = Dio(BaseOptions(
-         connectTimeout: const Duration(seconds: 30),
-         receiveTimeout: const Duration(seconds: 30),
-         validateStatus: (status) => status != null && status < 500,
-       ));
+  })  : _settingsRepository = settingsRepository,
+        _fileRepository = fileRepository,
+        _keychainService = keychainService,
+        _dio = Dio(BaseOptions(
+          connectTimeout: const Duration(seconds: 30),
+          receiveTimeout: const Duration(seconds: 30),
+          validateStatus: (status) => status != null && status < 500,
+        ));
 
   /// Check if currently monitoring
   bool get isMonitoring => _isMonitoring;
@@ -109,7 +109,7 @@ class AutoDestructionService {
 
       if (response.statusCode == 200) {
         final data = response.data;
-        
+
         if (data is Map<String, dynamic>) {
           final trigger = DestructionTrigger.fromJson(data);
 
@@ -167,12 +167,18 @@ class AutoDestructionService {
     return _secureCompare(trigger.signature!, expectedSignature);
   }
 
+  /// Public method to trigger complete data wipe
+  Future<void> wipeAllData() async {
+    await _executeDestruction();
+  }
+
   /// Execute secure destruction of all vault data
+
   Future<void> _executeDestruction() async {
     try {
       // Notify listeners before destruction
       _destructionController.add(null);
-      
+
       // Call pre-destruction callback if set
       if (onBeforeDestruction != null) {
         await onBeforeDestruction!();
@@ -203,28 +209,30 @@ class AutoDestructionService {
   ) async {
     try {
       final response = await _dio.get(url);
-      
+
       if (response.statusCode == 200) {
         final data = response.data;
-        
+
         if (data is Map<String, dynamic>) {
           // Check if response has expected format
           final hasTriggerField = data.containsKey('trigger_destruction');
-          
+
           return (
             reachable: true,
             validResponse: hasTriggerField,
-            error: hasTriggerField ? null : 'Response missing trigger_destruction field',
+            error: hasTriggerField
+                ? null
+                : 'Response missing trigger_destruction field',
           );
         }
-        
+
         return (
           reachable: true,
           validResponse: false,
           error: 'Invalid response format',
         );
       }
-      
+
       return (
         reachable: true,
         validResponse: false,
@@ -256,7 +264,7 @@ class AutoDestructionService {
   /// Secure comparison of two strings (constant time)
   bool _secureCompare(String a, String b) {
     if (a.length != b.length) return false;
-    
+
     var result = 0;
     for (var i = 0; i < a.length; i++) {
       result |= a.codeUnitAt(i) ^ b.codeUnitAt(i);
@@ -267,7 +275,8 @@ class AutoDestructionService {
   /// Log suspicious trigger attempt
   Future<void> _logSuspiciousTrigger(DestructionTrigger trigger) async {
     // In production, this would write to a secure audit log
-    print('SUSPICIOUS: Invalid destruction trigger signature at ${DateTime.now()}');
+    print(
+        'SUSPICIOUS: Invalid destruction trigger signature at ${DateTime.now()}');
   }
 
   /// Log network error

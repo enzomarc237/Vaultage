@@ -53,7 +53,7 @@ class _LockScreenState extends State<LockScreen> {
 
   Future<void> _tryBiometricUnlock() async {
     final result = await _biometricService.authenticateWithBiometrics();
-    
+
     if (result.success && result.wrappedMasterKey != null) {
       // Notify parent that biometric unlock succeeded
       if (widget.onBiometricUnlock != null) {
@@ -102,7 +102,7 @@ class _LockScreenState extends State<LockScreen> {
         _pinController.text = _pinDigits.join();
         _isError = false;
       });
-      
+
       // Auto-submit if we have 6+ digits
       if (_pinDigits.length >= 6) {
         _submitPin();
@@ -137,7 +137,7 @@ class _LockScreenState extends State<LockScreen> {
   @override
   Widget build(BuildContext context) {
     final isInLockout = widget.lockoutDuration != null;
-    
+
     return MacosScaffold(
       children: [
         ContentArea(
@@ -156,24 +156,24 @@ class _LockScreenState extends State<LockScreen> {
                       height: 80,
                       decoration: BoxDecoration(
                         color: _isError
-                          ? const Color.fromRGBO(255, 59, 48, 0.1)
-                          : const Color.fromRGBO(0, 122, 255, 0.1),
+                            ? const Color.fromRGBO(255, 59, 48, 0.1)
+                            : const Color.fromRGBO(0, 122, 255, 0.1),
                         shape: BoxShape.circle,
                       ),
                       child: Center(
                         child: MacosIcon(
                           _isError
-                            ? CupertinoIcons.exclamationmark_shield_fill
-                            : CupertinoIcons.lock_fill,
+                              ? CupertinoIcons.exclamationmark_shield_fill
+                              : CupertinoIcons.lock_fill,
                           size: 40,
                           color: _isError
-                            ? MacosColors.systemRedColor
-                            : MacosColors.systemBlueColor,
+                              ? MacosColors.systemRedColor
+                              : MacosColors.systemBlueColor,
                         ),
                       ),
                     ),
                     const SizedBox(height: 24),
-                    
+
                     // Title
                     Text(
                       _showRecovery ? 'Recovery Key' : 'Secure Vault',
@@ -181,17 +181,17 @@ class _LockScreenState extends State<LockScreen> {
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 8),
-                    
+
                     // Subtitle
                     Text(
                       _showRecovery
-                        ? 'Enter your 12-word recovery key'
-                        : 'Enter your PIN to unlock',
+                          ? 'Enter your 12-word recovery key'
+                          : 'Enter your PIN to unlock',
                       style: MacosTheme.of(context).typography.body,
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 32),
-                    
+
                     // PIN Display / Lockout Message
                     if (isInLockout)
                       _buildLockoutMessage()
@@ -199,13 +199,12 @@ class _LockScreenState extends State<LockScreen> {
                       _buildRecoveryInput()
                     else
                       _buildPinDisplay(),
-                    
+
                     const SizedBox(height: 32),
-                    
+
                     // Keypad (only show if not in lockout)
-                    if (!isInLockout && !_showRecovery)
-                      _buildKeypad(),
-                    
+                    if (!isInLockout && !_showRecovery) _buildKeypad(),
+
                     if (_showRecovery)
                       PushButton(
                         controlSize: ControlSize.large,
@@ -214,22 +213,28 @@ class _LockScreenState extends State<LockScreen> {
                         },
                         child: const Text('Submit Recovery Key'),
                       ),
-                    
+
                     const SizedBox(height: 16),
-                    
+
                     // Attempts remaining
-                    if (!isInLockout && !_showRecovery && widget.attemptsRemaining < 10)
+                    if (!isInLockout &&
+                        !_showRecovery &&
+                        widget.attemptsRemaining < 10)
                       Text(
                         '${widget.attemptsRemaining} attempts remaining',
-                        style: MacosTheme.of(context).typography.caption1.copyWith(
-                          color: widget.attemptsRemaining <= 3
-                            ? MacosColors.systemRedColor
-                            : MacosColors.systemOrangeColor,
-                        ),
+                        style:
+                            MacosTheme.of(context).typography.caption1.copyWith(
+                                  color: widget.attemptsRemaining <= 3
+                                      ? MacosColors.systemRedColor
+                                      : MacosColors.systemOrangeColor,
+                                ),
                       ),
-                    
+
                     // Biometric unlock button
-                    if (!isInLockout && !_showRecovery && _biometricAvailable && _biometricEnabled)
+                    if (!isInLockout &&
+                        !_showRecovery &&
+                        _biometricAvailable &&
+                        _biometricEnabled)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 12),
                         child: PushButton(
@@ -246,7 +251,7 @@ class _LockScreenState extends State<LockScreen> {
                           ),
                         ),
                       ),
-                    
+
                     // Recovery key link
                     if (!isInLockout && !_showRecovery)
                       GestureDetector(
@@ -264,7 +269,7 @@ class _LockScreenState extends State<LockScreen> {
                           ),
                         ),
                       ),
-                    
+
                     if (_showRecovery)
                       GestureDetector(
                         onTap: () {
@@ -281,6 +286,21 @@ class _LockScreenState extends State<LockScreen> {
                           ),
                         ),
                       ),
+
+                    const SizedBox(height: 32),
+                    const Divider(),
+                    const SizedBox(height: 16),
+
+                    TextButton(
+                      onPressed: () => _showResetConfirmation(context),
+                      child: Text(
+                        'Reset All Data',
+                        style: TextStyle(
+                          color: MacosColors.systemRedColor.withOpacity(0.8),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -296,13 +316,13 @@ class _LockScreenState extends State<LockScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: _isError
-          ? const Color.fromRGBO(255, 59, 48, 0.1)
-          : const Color.fromRGBO(128, 128, 128, 0.1),
+            ? const Color.fromRGBO(255, 59, 48, 0.1)
+            : const Color.fromRGBO(128, 128, 128, 0.1),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
           color: _isError
-            ? const Color.fromRGBO(255, 59, 48, 0.5)
-            : const Color.fromRGBO(128, 128, 128, 0.3),
+              ? const Color.fromRGBO(255, 59, 48, 0.5)
+              : const Color.fromRGBO(128, 128, 128, 0.3),
         ),
       ),
       child: Row(
@@ -316,8 +336,10 @@ class _LockScreenState extends State<LockScreen> {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: isFilled
-                ? (_isError ? MacosColors.systemRedColor : MacosColors.systemBlueColor)
-                : const Color.fromRGBO(128, 128, 128, 0.3),
+                  ? (_isError
+                      ? MacosColors.systemRedColor
+                      : MacosColors.systemBlueColor)
+                  : const Color.fromRGBO(128, 128, 128, 0.3),
             ),
           );
         }),
@@ -381,7 +403,7 @@ class _LockScreenState extends State<LockScreen> {
           ),
           const SizedBox(height: 12),
         ],
-        
+
         // Bottom row (Clear, 0, Backspace)
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -395,7 +417,8 @@ class _LockScreenState extends State<LockScreen> {
     );
   }
 
-  Widget _buildKeypadButton(String label, {bool isAction = false, VoidCallback? onTap}) {
+  Widget _buildKeypadButton(String label,
+      {bool isAction = false, VoidCallback? onTap}) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: MacosIconButton(
@@ -405,8 +428,8 @@ class _LockScreenState extends State<LockScreen> {
             fontSize: isAction ? 18 : 24,
             fontWeight: FontWeight.w500,
             color: isAction
-              ? MacosColors.systemBlueColor
-              : MacosTheme.of(context).typography.body.color,
+                ? MacosColors.systemBlueColor
+                : MacosTheme.of(context).typography.body.color,
           ),
         ),
         onPressed: onTap ?? () => _addDigit(label),
@@ -423,5 +446,69 @@ class _LockScreenState extends State<LockScreen> {
   void dispose() {
     _pinController.dispose();
     super.dispose();
+  }
+
+  void _showResetConfirmation(BuildContext context) {
+    showMacosAlertDialog(
+      context: context,
+      builder: (context) => MacosAlertDialog(
+        appIcon: const MacosIcon(
+          CupertinoIcons.trash_fill,
+          color: MacosColors.systemRedColor,
+          size: 56,
+        ),
+        title: const Text('Reset All Data?'),
+        message: const Text(
+          'This will permanently delete all files in the vault, clear your master password, recovery key, and reset all settings.\n\nThis action CANNOT be undone.',
+        ),
+        primaryButton: PushButton(
+          controlSize: ControlSize.large,
+          color: MacosColors.systemRedColor,
+          onPressed: () {
+            Navigator.pop(context);
+            _showFinalConfirmation(context);
+          },
+          child: const Text('Reset Everything'),
+        ),
+        secondaryButton: PushButton(
+          controlSize: ControlSize.large,
+          secondary: true,
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+      ),
+    );
+  }
+
+  void _showFinalConfirmation(BuildContext context) {
+    showMacosAlertDialog(
+      context: context,
+      builder: (context) => MacosAlertDialog(
+        appIcon: const MacosIcon(
+          CupertinoIcons.exclamationmark_shield_fill,
+          color: MacosColors.systemRedColor,
+          size: 56,
+        ),
+        title: const Text('Final Confirmation'),
+        message: const Text(
+          'Are you absolutely sure? Everything will be lost forever.',
+        ),
+        primaryButton: PushButton(
+          controlSize: ControlSize.large,
+          color: MacosColors.systemRedColor,
+          onPressed: () {
+            Navigator.pop(context);
+            context.read<AuthBloc>().add(ResetAllRequested());
+          },
+          child: const Text('I am sure, Reset Now'),
+        ),
+        secondaryButton: PushButton(
+          controlSize: ControlSize.large,
+          secondary: true,
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+      ),
+    );
   }
 }

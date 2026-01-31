@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../services/crypto_service.dart';
 import '../services/keychain_service.dart';
+import '../services/auto_destruction_service.dart';
 
 // Events
 abstract class AuthEvent extends Equatable {
@@ -60,6 +61,8 @@ class PinChanged extends AuthEvent {
   List<Object?> get props => [currentPin, newPin];
 }
 
+class ResetAllRequested extends AuthEvent {}
+
 // States
 abstract class AuthState extends Equatable {
   const AuthState();
@@ -86,7 +89,8 @@ class AuthLocked extends AuthState {
   });
 
   @override
-  List<Object?> get props => [attemptsRemaining, lockoutDuration, lockoutEndTime];
+  List<Object?> get props =>
+      [attemptsRemaining, lockoutDuration, lockoutEndTime];
 }
 
 class AuthAuthenticated extends AuthState {
@@ -124,19 +128,21 @@ class AuthLockout extends AuthState {
 class AuthBloc extends Bloc<AuthEvent, AuthState> {
   final KeychainService _keychainService;
   final CryptoService _cryptoService;
-  
+
   // Rate limiting state
   int _failedAttempts = 0;
   DateTime? _lockoutEndTime;
   static const int maxAttempts = 10;
   static const Duration initialLockoutDuration = Duration(seconds: 30);
-  
+
   AuthBloc({
     required KeychainService keychainService,
     required CryptoService cryptoService,
-  }) : _keychainService = keychainService,
-       _cryptoService = cryptoService,
-       super(AuthInitial()) {
+    required AutoDestructionService autoDestructionService,
+  })  : _keychainService = keychainService,
+        _cryptoService = cryptoService,
+        _autoDestructionService = autoDestructionService,
+        super(AuthInitial()) {
     on<AuthCheckRequested>(_onAuthCheckRequested);
     on<UnlockRequested>(_onUnlockRequested);
     on<BiometricUnlockRequested>(_onBiometricUnlockRequested);
@@ -146,21 +152,24 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     on<AppFocused>(_onAppFocused);
     on<RecoveryKeySubmitted>(_onRecoveryKeySubmitted);
     on<PinChanged>(_onPinChanged);
+    on<ResetAllRequested>(_onResetAllRequested);
   }
+
+  final AutoDestructionService _autoDestructionService;
 
   Future<void> _onAuthCheckRequested(
     AuthCheckRequested event,
     Emitter<AuthState> emit,
   ) async {
     emit(AuthLoading());
-    
+
     final isInitialized = await _keychainService.isVaultInitialized();
-    
+
     if (!isInitialized) {
       emit(AuthNeedsSetup());
       return;
     }
-    
+
     emit(const AuthLocked(attemptsRemaining: maxAttempts));
   }
 
@@ -177,44 +186,45 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       ));
       return;
     }
-    
+
     emit(AuthLoading());
-    
+
     try {
       final wrappedKey = await _keychainService.getWrappedMasterKey();
       final salt = await _keychainService.getKdfSalt();
-      
+
       if (wrappedKey == null || salt == null) {
         emit(const AuthFailure(message: 'Vault not properly initialized'));
         emit(const AuthLocked(attemptsRemaining: maxAttempts));
         return;
       }
-      
+
       final unlocked = await _cryptoService.unlockWithPin(
         event.pin,
         wrappedKey,
         salt,
       );
-      
+
       if (unlocked) {
         // Reset failed attempts on successful unlock
         _failedAttempts = 0;
         _lockoutEndTime = null;
-        
+
         await _keychainService.recordLockEvent();
         emit(AuthAuthenticated(authenticatedAt: DateTime.now()));
       } else {
         _failedAttempts++;
         final remainingAttempts = maxAttempts - _failedAttempts;
-        
+
         if (remainingAttempts <= 0) {
           // Calculate exponential backoff
           final lockoutMultiplier = _failedAttempts - maxAttempts + 1;
           final lockoutDuration = Duration(
-            seconds: initialLockoutDuration.inSeconds * (1 << lockoutMultiplier),
+            seconds:
+                initialLockoutDuration.inSeconds * (1 << lockoutMultiplier),
           );
           _lockoutEndTime = DateTime.now().add(lockoutDuration);
-          
+
           emit(AuthLockout(
             remainingDuration: lockoutDuration,
             totalAttempts: _failedAttempts,
@@ -238,24 +248,24 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     Emitter<AuthState> emit,
   ) async {
     emit(AuthLoading());
-    
+
     try {
       final wrappedKey = await _keychainService.getWrappedMasterKey();
-      
+
       if (wrappedKey == null) {
         emit(const AuthFailure(message: 'Vault not properly initialized'));
         emit(const AuthLocked(attemptsRemaining: maxAttempts));
         return;
       }
-      
+
       // Biometric auth already succeeded in UI, just need to unlock vault
       // The wrapped key is retrieved from keychain after biometric auth
       _cryptoService.unlockWithBiometricKey(wrappedKey);
-      
+
       // Reset failed attempts
       _failedAttempts = 0;
       _lockoutEndTime = null;
-      
+
       await _keychainService.recordLockEvent();
       emit(AuthAuthenticated(authenticatedAt: DateTime.now()));
     } catch (e) {
@@ -278,20 +288,20 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     Emitter<AuthState> emit,
   ) async {
     emit(AuthLoading());
-    
+
     try {
       final result = await _cryptoService.initializeWithPin(
         event.pin,
         recoveryKey: event.recoveryKey,
       );
-      
+
       // Store keys in keychain
       await _keychainService.storeWrappedMasterKey(result.wrappedMasterKey);
       await _keychainService.storeKdfSalt(result.salt);
       await _keychainService.storeKdfParams(result.params);
       await _keychainService.storeRecoveryKeyHash(result.recoveryKey);
       await _keychainService.setVaultInitialized(true);
-      
+
       emit(AuthAuthenticated(authenticatedAt: DateTime.now()));
     } catch (e) {
       emit(AuthFailure(message: 'Setup failed: $e'));
@@ -325,9 +335,9 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     Emitter<AuthState> emit,
   ) async {
     emit(AuthLoading());
-    
+
     final isValid = await _keychainService.verifyRecoveryKey(event.recoveryKey);
-    
+
     if (isValid) {
       // Recovery successful - user needs to set new PIN
       // For now, just authenticate them
@@ -346,30 +356,30 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       emit(const AuthFailure(message: 'Must be authenticated to change PIN'));
       return;
     }
-    
+
     emit(AuthLoading());
-    
+
     try {
       final currentWrappedKey = await _keychainService.getWrappedMasterKey();
       final currentSalt = await _keychainService.getKdfSalt();
-      
+
       if (currentWrappedKey == null || currentSalt == null) {
         emit(const AuthFailure(message: 'Vault keys not found'));
         emit(AuthAuthenticated(authenticatedAt: DateTime.now()));
         return;
       }
-      
+
       final result = await _cryptoService.changePin(
         event.currentPin,
         event.newPin,
         currentWrappedKey,
         currentSalt,
       );
-      
+
       await _keychainService.storeWrappedMasterKey(result.wrappedMasterKey);
       await _keychainService.storeKdfSalt(result.salt);
       await _keychainService.storeKdfParams(result.params);
-      
+
       emit(AuthAuthenticated(authenticatedAt: DateTime.now()));
     } catch (e) {
       emit(AuthFailure(message: 'Failed to change PIN: $e'));
@@ -379,11 +389,24 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
 
   Duration? _calculateBackoffDuration() {
     if (_failedAttempts < 5) return null;
-    
+
     final lockoutMultiplier = _failedAttempts - 4;
     return Duration(
       seconds: initialLockoutDuration.inSeconds * (1 << lockoutMultiplier),
     );
+  }
+
+  Future<void> _onResetAllRequested(
+    ResetAllRequested event,
+    Emitter<AuthState> emit,
+  ) async {
+    emit(AuthLoading());
+    try {
+      await _autoDestructionService.wipeAllData();
+      emit(AuthNeedsSetup());
+    } catch (e) {
+      emit(AuthFailure(message: 'Reset failed: $e'));
+    }
   }
 
   @override
